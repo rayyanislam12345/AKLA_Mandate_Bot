@@ -39,6 +39,10 @@ def parse_args():
         help="Force re-download/re-scan of the N most recently listed candidate "
              "tenders, even if already marked as seen (listing order = newest first).",
     )
+    parser.add_argument(
+        "--source", choices=["all", "punjab", "bppt", "kppra"], default="all",
+        help="Run only one source instead of all three.",
+    )
     return parser.parse_args()
 
 
@@ -56,36 +60,38 @@ def run():
         ],
     )
 
-    src = cfg["source"]
-    scraper = TenderScraper(
-        base_url=src["base_url"],
-        listing_path=src["listing_path"],
-        verify_ssl=not src.get("insecure_skip_verify", False),
-        request_delay=src.get("request_delay_seconds", 1.5),
-        max_pages=src.get("max_pages", 20),
-    )
-
     state = SeenState(cfg["paths"]["state_file"])
-    categories = {c.lower() for c in cfg.get("categories", [])}
     keywords = cfg.get("keywords", [])
 
-    tenders = scraper.fetch_all()
-    log.info("Fetched %d tenders total", len(tenders))
-
-    candidates = [t for t in tenders if t.category.lower() in categories]
-    log.info("%d tenders match category filter %s", len(candidates), sorted(categories))
-
-    if args.rescan_last > 0:
-        forced = candidates[:args.rescan_last]
-        for t in forced:
-            state.unmark(t.key)
-        log.info("--rescan-last %d: force-unmarked %d candidates for re-scan",
-                  args.rescan_last, len(forced))
-
-    new_candidates = [t for t in candidates if not state.has(t.key)]
-    log.info("%d are new (not previously processed)", len(new_candidates))
-
     match_count = 0
+    new_candidates = []
+    if args.source in ("all", "punjab"):
+        src = cfg["source"]
+        scraper = TenderScraper(
+            base_url=src["base_url"],
+            listing_path=src["listing_path"],
+            verify_ssl=not src.get("insecure_skip_verify", False),
+            request_delay=src.get("request_delay_seconds", 1.5),
+            max_pages=src.get("max_pages", 20),
+        )
+        categories = {c.lower() for c in cfg.get("categories", [])}
+
+        tenders = scraper.fetch_all()
+        log.info("Fetched %d tenders total", len(tenders))
+
+        candidates = [t for t in tenders if t.category.lower() in categories]
+        log.info("%d tenders match category filter %s", len(candidates), sorted(categories))
+
+        if args.rescan_last > 0:
+            forced = candidates[:args.rescan_last]
+            for t in forced:
+                state.unmark(t.key)
+            log.info("--rescan-last %d: force-unmarked %d candidates for re-scan",
+                      args.rescan_last, len(forced))
+
+        new_candidates = [t for t in candidates if not state.has(t.key)]
+        log.info("%d are new (not previously processed)", len(new_candidates))
+
     for t in new_candidates:
         urls = [u for u in (t.document_url, t.notice_url) if u]
         if not urls:
@@ -144,7 +150,7 @@ def run():
 
     bppt_cfg = cfg.get("bppt", {})
     bppt_checked = 0
-    if bppt_cfg.get("enabled"):
+    if bppt_cfg.get("enabled") and args.source in ("all", "bppt"):
         from . import bppt as bppt_module
 
         bppt_tenders = bppt_module.fetch_all(
@@ -172,7 +178,7 @@ def run():
 
     kppra_cfg = cfg.get("kppra", {})
     kppra_checked = 0
-    if kppra_cfg.get("enabled"):
+    if kppra_cfg.get("enabled") and args.source in ("all", "kppra"):
         from . import kppra as kppra_module
 
         kppra_tenders = kppra_module.fetch_all(
