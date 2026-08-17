@@ -14,6 +14,7 @@ class Tender:
     document_url: str | None = None   # "Bidding Document" PDF (full package)
     source: str = "punjab"            # which portal this tender came from
     extra_urls: list[str] = field(default_factory=list)  # corrigenda, addenda, minutes, etc.
+    tender_ref: str = ""              # portal's own reference/ID number, when available
 
     @property
     def key(self) -> str:

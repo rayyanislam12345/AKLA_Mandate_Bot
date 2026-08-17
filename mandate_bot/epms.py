@@ -68,6 +68,7 @@ def _parse_listing_rows(html: str, category: str) -> list[Tender]:
             notice_url=detail_a["href"],  # detail page, resolved to docs in process_candidates
             document_url=None,
             source="epms",
+            tender_ref=tds[1].get_text(strip=True),
         ))
     return tenders
 
@@ -182,6 +183,8 @@ def process_candidates(candidates: list[Tender], keywords: list[str], cfg: dict,
                         "notice_url": t.notice_url or "",
                         "document_url": "; ".join(doc_urls),
                         "saved_dir": dest_dir,
+                        "tender_ref": t.tender_ref,
+                        "extra_urls": "",  # doc_urls above already covers everything found for this source
                     })
         except Exception:
             log_.exception("Error processing EPMS tender %s", t.title)

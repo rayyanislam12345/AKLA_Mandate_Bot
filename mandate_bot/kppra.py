@@ -127,6 +127,7 @@ def fetch_all(base_url: str, listing_path: str, categories: list[str],
                 notice_url=doc_url(detail.get("tender_file")),
                 document_url=doc_url(detail.get("bidding_doc")) or doc_url(detail.get("tender_file")),
                 source="kppra",
+                tender_ref=row["tender_ref"],
                 extra_urls=extra_urls,
             ))
 
@@ -211,6 +212,8 @@ def process_candidates(candidates: list[Tender], keywords: list[str], cfg: dict,
                         "notice_url": t.notice_url or "",
                         "document_url": t.document_url or "",
                         "saved_dir": dest_dir,
+                        "tender_ref": t.tender_ref,
+                        "extra_urls": "; ".join(t.extra_urls),
                     })
         except Exception:
             log_.exception("Error processing KPPRA tender %s", t.title)

@@ -138,6 +138,8 @@ def run():
                         "notice_url": t.notice_url or "",
                         "document_url": t.document_url or "",
                         "saved_dir": dest_dir,
+                        "tender_ref": t.tender_ref,
+                        "extra_urls": "; ".join(t.extra_urls),
                     })
         except Exception:
             log.exception("Error processing tender %s", t.title)

@@ -82,6 +82,7 @@ def _parse_row(row, category: str, base_url: str) -> Tender | None:
     title_link = title_cell.find("a", class_="cursor-pointer")
     lines = [l.strip() for l in title_link.get_text(separator="\n").split("\n") if l.strip()] if title_link else []
     # lines[0] is the TSE reference number, lines[1] is the actual title
+    tse_ref = lines[0] if lines else ""
     title = lines[1] if len(lines) > 1 else (lines[0] if lines else title_cell.get_text(" ", strip=True))
 
     links = {a.get("title"): urljoin(base_url, a["href"]) for a in title_cell.find_all("a", href=True) if a.get("href")}
@@ -101,6 +102,7 @@ def _parse_row(row, category: str, base_url: str) -> Tender | None:
         notice_url=links.get("NIT Report"),
         document_url=links.get("Bidding Document"),
         source="bppt",
+        tender_ref=tse_ref,
     )
 
 
@@ -227,6 +229,8 @@ def process_candidates(candidates: list[Tender], keywords: list[str], cfg: dict,
                             "notice_url": t.notice_url or "",
                             "document_url": t.document_url or "",
                             "saved_dir": dest_dir,
+                            "tender_ref": t.tender_ref,
+                            "extra_urls": "; ".join(t.extra_urls),
                         })
             except Exception:
                 log_.exception("Error processing BPPT tender %s", t.title)

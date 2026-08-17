@@ -1,13 +1,16 @@
 # Mandate Bot
 
-Scrapes active tenders from two government procurement portals, downloads
-tender documents for anything tagged as a legal-adjacent procurement type,
-scans the document text for legal-services keywords, and saves the
-documents for any match into `downloads/`.
+Scrapes active tenders from four government procurement portals, downloads
+tender documents (plus any corrigenda/addenda/minutes) for anything tagged
+as a legal-adjacent procurement type, scans the text for legal-services
+keywords, saves matches into `downloads/`, and generates a browsable local
+dashboard (`dashboard.html`) of everything found.
 
 Sources:
 - **Punjab (Pakistan) e-Procurement portal** (`eproc.punjab.gov.pk`)
 - **Balochistan Public Procurement Regulatory Authority** (`bpptwo.vdc.services`)
+- **Khyber Pakhtunkhwa Public Procurement Regulatory Authority** (`kppra.gov.pk`)
+- **Federal PPRA e-Publish & Monitoring System** (`epms.ppra.gov.pk`)
 
 ## How it works
 
@@ -36,13 +39,53 @@ headless browser (Playwright) instead of plain HTTP requests:
 3. If a match is found, a PDF snapshot of each rendered page (`page.pdf()`)
    is saved as the archived document.
 
-### Both sources
+### KPPRA (`mandate_bot/kppra.py`)
+Classic server-rendered PHP with query-string pagination — plain `requests`,
+no browser needed. The listing table doesn't show a category, so a small
+AJAX JSON endpoint is called once per listed tender to classify it (and,
+when present, to pick up corrigendum/addendum/meeting-minutes documents the
+listing table never shows at all). Documents are a mix of real PDFs and
+photographed/scanned JPGs of physical notice boards; both go through the
+same OCR-capable text extraction as the Punjab source.
+
+### EPMS / federal PPRA (`mandate_bot/epms.py`)
+Also classic server-rendered pages, plain `requests`. Unlike KPPRA, its
+category filter (`procurement_category`) actually works server-side, so
+only real Consultancy/Non-consultancy Services candidates get fetched
+instead of classifying every tender individually. Each tender's detail page
+is scanned for every `/pdf?file=...` link present (not just a fixed pair),
+so corrigendum documents are picked up automatically whenever they exist.
+
+### All sources
 The combined text is checked against the keyword list in `config.yaml`. If
-any keyword hits, the documents are saved into
-`downloads/<publish-date>_<title>/` and a row is appended to
-`logs/matches.csv` (with a `source` column). Every tender checked (match or
+any keyword hits, every document found for that tender (primary + any
+corrigenda/addenda/minutes) is saved into `downloads/<publish-date>_<title>/`
+and a row is appended to `logs/matches.csv`. Every tender checked (match or
 not) is recorded in `state/seen.json` so re-runs only process newly
-published tenders.
+published tenders — and that state is saved after every single tender, not
+just at the end, so a long run can be safely interrupted and resumed later.
+
+## Browsing matches (`dashboard.html`)
+
+```bash
+python3 generate_dashboard.py
+open dashboard.html   # macOS; or just double-click the file
+```
+
+Regenerates a single self-contained HTML file from `logs/matches.csv` +
+whatever's actually still present in `downloads/` (rows whose folder was
+deleted are skipped, so it always reflects what's really on disk). No
+server needed — it's opened directly in a browser via `file://`, with
+document links as relative paths straight to the PDFs.
+
+Shows: source portal, tender reference number (when the portal exposes
+one), title, department, category, publish/closing dates, which keywords
+matched, when it was found, and download links for every saved document.
+Has a search box (matches title/department/keywords/ref) and a source
+filter; click any column header to sort.
+
+Re-run it any time after a bot run to refresh — it's cheap and instant
+(no network calls, just reads the CSV and the downloads folder).
 
 ## Setup
 
@@ -91,14 +134,18 @@ python3 -m mandate_bot.main --rescan-last 50   # force re-check the 50 most rece
   It's a read-only public listing (no login/credentials sent), so the risk
   is limited, but flip this off the day they fix their cert. (Balochistan's
   portal has a valid certificate, no such flag needed there.)
-- `source.max_pages` / `bppt.max_pages` — safety cap on how many grid pages
-  to walk per run, per source.
-- `categories` (Punjab) / `bppt.categories` (Balochistan) — which listing
-  categories to bother downloading/scanning. Balochistan's categories are a
-  proper UNSPSC-style taxonomy shown per row; Punjab's is a crude
-  Goods/Services/Works/Consultancy split.
+- `source.max_pages` / `bppt.max_pages` / `kppra.max_pages` /
+  `epms.max_pages` — safety cap on how many grid pages to walk per run, per
+  source. BPPT's Services category alone runs to 150+ pages, so its cap is
+  set much higher (250) than the others.
+- `categories` (Punjab) / `bppt.categories` / `kppra.categories` /
+  `epms.categories` — which listing categories to bother
+  downloading/scanning, per source. Balochistan's and EPMS's are proper
+  taxonomies with working server-side filters; Punjab's and KPPRA's are
+  cruder and/or require per-tender classification (see each source's
+  section above).
 - `keywords` — case-insensitive substring match against extracted document
-  text, shared by both sources. Tuned to avoid boilerplate false positives:
+  text, shared by all sources. Tuned to avoid boilerplate false positives:
   generic terms like "attorney", "litigation", "firm", and bare "legal"
   were deliberately left out because they appear in nearly every government
   bidding document's standard dispute-resolution and Power-of-Attorney
