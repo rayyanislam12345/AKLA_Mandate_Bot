@@ -62,7 +62,11 @@ bppt:
   categories:
     - "Services"
     - "Consulting Services"
-  max_pages: 30                # safety cap on grid pages to walk, per category
+  # Services alone has ~1400 entries across ~150+ pages at this site's
+  # variable page size (4-10 rows/page observed) — set well above that so a
+  # full run doesn't quietly truncate. The "page repeated" stuck-page check
+  # in bppt.py still stops early once a category is genuinely exhausted.
+  max_pages: 250                # safety cap on grid pages to walk, per category
   request_delay_seconds: 1.0   # be polite to the server
 
 # Khyber Pakhtunkhwa Public Procurement Regulatory Authority (KPPRA) portal.
