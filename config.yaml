@@ -1,0 +1,88 @@
+# Mandate Bot configuration
+
+source:
+  base_url: "https://eproc.punjab.gov.pk/"
+  listing_path: "ActiveTenders.aspx"
+  # This portal's TLS cert is expired (server-side issue, confirmed 2026-08-15).
+  # Set to true to allow the bot to run at all; the risk is limited since this
+  # is a read-only public tender listing, not a login/credentials flow.
+  insecure_skip_verify: true
+  max_pages: 20        # safety cap on grid pages to walk
+  request_delay_seconds: 1.5   # be polite to the server
+
+# Only rows whose "Type" column matches one of these are downloaded/scanned.
+# Punjab eProc lumps legal services under "Services" (and sometimes "Consultancy"),
+# there is no dedicated "Legal" category, hence the keyword pass below.
+categories:
+  - "Services"
+  - "Consultancy"
+
+# Case-insensitive keyword match against the extracted PDF text.
+# A tender is considered a match if ANY keyword is found in EITHER the
+# bidding document or the tender notice PDF.
+keywords:
+  - "legal services"
+  - "legal advisor"
+  - "legal advisory"
+  - "legal consultant"
+  - "legal counsel"
+  - "legal opinion"
+  - "law firm"
+  - "panel of advocates"
+  - "advocate general"
+  - "advocate on record"
+  - "legal retainer"
+  - "panel of lawyers"
+  - "panel lawyer"
+  - "legal representation"
+  - "engagement of legal"
+  - "hiring of legal"
+  - "empanelment of legal"
+  - "empanelment of advocates"
+  - "empanelment of law"
+
+# Keywords in this list are boilerplate false-positive traps seen in nearly
+# every bidding document on this portal (dispute-resolution clauses, "Power
+# of Attorney" signatory requirements) and were deliberately excluded even
+# though they sound legal-related: "attorney", "litigation", "arbitration".
+# The same list above is reused for the bppt source below.
+
+# Balochistan Public Procurement Regulatory Authority (BPPRA) portal.
+# A Blazor Server app: pagination and category filters run over a live
+# WebSocket connection, so this source is scraped with a headless browser
+# (Playwright) instead of plain HTTP requests. Its "documents" are rendered
+# report pages, not real PDFs, so text is extracted by rendering them and a
+# PDF snapshot is printed (page.pdf()) as the saved artifact.
+bppt:
+  enabled: true
+  base_url: "https://bpptwo.vdc.services:5451/"
+  listing_path: "Tenders"
+  # Category filter buttons on the site's toolbar. "Consulting Services"
+  # currently returns 0 active tenders but is kept in case that changes.
+  categories:
+    - "Services"
+    - "Consulting Services"
+  max_pages: 30                # safety cap on grid pages to walk, per category
+  request_delay_seconds: 1.0   # be polite to the server
+
+# Khyber Pakhtunkhwa Public Procurement Regulatory Authority (KPPRA) portal.
+# Classic server-rendered PHP with query-string pagination, no browser
+# needed. Category isn't shown in the listing table, only via a small AJAX
+# JSON endpoint called once per tender to classify it. Documents are a mix
+# of real PDFs and photographed/scanned JPGs of physical notices; both are
+# OCR'd as needed (see kppra.py).
+kppra:
+  enabled: true
+  base_url: "http://www.kppra.gov.pk/kppra/"
+  listing_path: "activetenders.php"
+  categories:
+    - "Consulting Services"
+    - "NON-Consulting Services"
+  max_pages: 20
+  request_delay_seconds: 0.5
+
+paths:
+  download_dir: "downloads"
+  state_file: "state/seen.json"
+  match_log: "logs/matches.csv"
+  run_log: "logs/run.log"

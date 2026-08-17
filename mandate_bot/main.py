@@ -1,0 +1,202 @@
+from __future__ import annotations
+
+import argparse
+import logging
+import os
+import tempfile
+import time
+from datetime import datetime
+
+import yaml
+
+from .logging_utils import append_match_log, slugify
+from .matcher import find_matches
+from .pdf_utils import download_pdf, extract_text
+from .scraper import TenderScraper
+from .state import SeenState
+
+log = logging.getLogger("mandate_bot")
+
+CONFIG_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config.yaml")
+
+
+def load_config(path: str = CONFIG_PATH) -> dict:
+    with open(path, "r", encoding="utf-8") as f:
+        return yaml.safe_load(f)
+
+
+def ensure_dirs(cfg: dict):
+    os.makedirs(cfg["paths"]["download_dir"], exist_ok=True)
+    os.makedirs(os.path.dirname(cfg["paths"]["state_file"]), exist_ok=True)
+    os.makedirs(os.path.dirname(cfg["paths"]["match_log"]), exist_ok=True)
+    os.makedirs(os.path.dirname(cfg["paths"]["run_log"]), exist_ok=True)
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Mandate Bot")
+    parser.add_argument(
+        "--rescan-last", type=int, default=0, metavar="N",
+        help="Force re-download/re-scan of the N most recently listed candidate "
+             "tenders, even if already marked as seen (listing order = newest first).",
+    )
+    return parser.parse_args()
+
+
+def run():
+    args = parse_args()
+    cfg = load_config()
+    ensure_dirs(cfg)
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        handlers=[
+            logging.FileHandler(cfg["paths"]["run_log"]),
+            logging.StreamHandler(),
+        ],
+    )
+
+    src = cfg["source"]
+    scraper = TenderScraper(
+        base_url=src["base_url"],
+        listing_path=src["listing_path"],
+        verify_ssl=not src.get("insecure_skip_verify", False),
+        request_delay=src.get("request_delay_seconds", 1.5),
+        max_pages=src.get("max_pages", 20),
+    )
+
+    state = SeenState(cfg["paths"]["state_file"])
+    categories = {c.lower() for c in cfg.get("categories", [])}
+    keywords = cfg.get("keywords", [])
+
+    tenders = scraper.fetch_all()
+    log.info("Fetched %d tenders total", len(tenders))
+
+    candidates = [t for t in tenders if t.category.lower() in categories]
+    log.info("%d tenders match category filter %s", len(candidates), sorted(categories))
+
+    if args.rescan_last > 0:
+        forced = candidates[:args.rescan_last]
+        for t in forced:
+            state.unmark(t.key)
+        log.info("--rescan-last %d: force-unmarked %d candidates for re-scan",
+                  args.rescan_last, len(forced))
+
+    new_candidates = [t for t in candidates if not state.has(t.key)]
+    log.info("%d are new (not previously processed)", len(new_candidates))
+
+    match_count = 0
+    for t in new_candidates:
+        urls = [u for u in (t.document_url, t.notice_url) if u]
+        if not urls:
+            state.mark(t.key)
+            continue
+
+        combined_text = ""
+        tmp_files = []
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                for i, url in enumerate(urls):
+                    tmp_path = os.path.join(tmpdir, f"doc_{i}.pdf")
+                    ok = download_pdf(scraper.session, url, tmp_path, verify_ssl=scraper.verify_ssl)
+                    if ok:
+                        tmp_files.append((url, tmp_path))
+                        combined_text += "\n" + extract_text(tmp_path)
+                    time.sleep(src.get("request_delay_seconds", 1.5))
+
+                hits = find_matches(combined_text, keywords)
+                if hits:
+                    match_count += 1
+                    folder_name = f"{t.publish_date.replace(' ', '')}_{slugify(t.title)}".replace("/", "-")
+                    dest_dir = os.path.join(cfg["paths"]["download_dir"], folder_name)
+                    os.makedirs(dest_dir, exist_ok=True)
+                    for url, tmp_path in tmp_files:
+                        dest_name = os.path.basename(url)
+                        with open(tmp_path, "rb") as src_f, open(os.path.join(dest_dir, dest_name), "wb") as dst_f:
+                            dst_f.write(src_f.read())
+
+                    log.info("MATCH: %s (%s) — keywords: %s", t.title, t.department, hits)
+                    append_match_log(cfg["paths"]["match_log"], {
+                        "found_at": datetime.now().isoformat(timespec="seconds"),
+                        "source": t.source,
+                        "title": t.title,
+                        "department": t.department,
+                        "category": t.category,
+                        "notice_type": t.notice_type,
+                        "publish_date": t.publish_date,
+                        "close_date": t.close_date,
+                        "matched_keywords": "; ".join(hits),
+                        "notice_url": t.notice_url or "",
+                        "document_url": t.document_url or "",
+                        "saved_dir": dest_dir,
+                    })
+        except Exception:
+            log.exception("Error processing tender %s", t.title)
+            continue
+
+        state.mark(t.key)
+
+    bppt_cfg = cfg.get("bppt", {})
+    bppt_checked = 0
+    if bppt_cfg.get("enabled"):
+        from . import bppt as bppt_module
+
+        bppt_tenders = bppt_module.fetch_all(
+            base_url=bppt_cfg["base_url"],
+            listing_path=bppt_cfg["listing_path"],
+            categories=bppt_cfg.get("categories", ["Services"]),
+            request_delay=bppt_cfg.get("request_delay_seconds", 1.0),
+            max_pages=bppt_cfg.get("max_pages", 30),
+        )
+        log.info("BPPT: fetched %d candidate tenders", len(bppt_tenders))
+
+        if args.rescan_last > 0:
+            forced = bppt_tenders[:args.rescan_last]
+            for t in forced:
+                state.unmark(t.key)
+            log.info("BPPT: --rescan-last %d: force-unmarked %d candidates for re-scan",
+                      args.rescan_last, len(forced))
+
+        new_bppt = [t for t in bppt_tenders if not state.has(t.key)]
+        bppt_checked = len(new_bppt)
+        log.info("BPPT: %d are new (not previously processed)", bppt_checked)
+
+        bppt_matches = bppt_module.process_candidates(new_bppt, keywords, cfg, state, log)
+        match_count += bppt_matches
+
+    kppra_cfg = cfg.get("kppra", {})
+    kppra_checked = 0
+    if kppra_cfg.get("enabled"):
+        from . import kppra as kppra_module
+
+        kppra_tenders = kppra_module.fetch_all(
+            base_url=kppra_cfg["base_url"],
+            listing_path=kppra_cfg["listing_path"],
+            categories=kppra_cfg.get("categories", ["Consulting Services", "NON-Consulting Services"]),
+            verify_ssl=not kppra_cfg.get("insecure_skip_verify", False),
+            request_delay=kppra_cfg.get("request_delay_seconds", 0.5),
+            max_pages=kppra_cfg.get("max_pages", 20),
+        )
+        log.info("KPPRA: fetched %d candidate tenders", len(kppra_tenders))
+
+        if args.rescan_last > 0:
+            forced = kppra_tenders[:args.rescan_last]
+            for t in forced:
+                state.unmark(t.key)
+            log.info("KPPRA: --rescan-last %d: force-unmarked %d candidates for re-scan",
+                      args.rescan_last, len(forced))
+
+        new_kppra = [t for t in kppra_tenders if not state.has(t.key)]
+        kppra_checked = len(new_kppra)
+        log.info("KPPRA: %d are new (not previously processed)", kppra_checked)
+
+        kppra_matches = kppra_module.process_candidates(new_kppra, keywords, cfg, state, log)
+        match_count += kppra_matches
+
+    state.save()
+    log.info("Run complete. %d new matches found out of %d new candidates checked.",
+              match_count, len(new_candidates) + bppt_checked + kppra_checked)
+
+
+if __name__ == "__main__":
+    run()
