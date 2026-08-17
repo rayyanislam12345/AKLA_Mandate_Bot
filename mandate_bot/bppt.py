@@ -52,6 +52,27 @@ def _goto_with_retry(page, url: str, log_: logging.Logger):
     raise last_exc
 
 
+def _render_with_retry(page, url: str, log_: logging.Logger) -> str:
+    """Render a document and return its text, retrying the *whole* sequence
+    (goto + settle + read) as one unit on failure. A flaky connection can
+    drop out partway through any of these steps, not just navigation, so a
+    half-loaded page isn't worth resuming from — each attempt starts fresh."""
+    last_exc = None
+    for attempt in range(GOTO_RETRIES):
+        try:
+            page.goto(url, wait_until="networkidle", timeout=30000)
+            page.wait_for_timeout(1000)
+            return page.inner_text("body")
+        except Exception as exc:
+            last_exc = exc
+            if attempt < GOTO_RETRIES - 1:
+                delay = GOTO_RETRY_BACKOFF[attempt]
+                log_.warning("Rendering %s failed (attempt %d/%d): %s — retrying in %ds",
+                             url, attempt + 1, GOTO_RETRIES, exc, delay)
+                time.sleep(delay)
+    raise last_exc
+
+
 def _parse_row(row, category: str, base_url: str) -> Tender | None:
     tds = row.find_all("td", recursive=False)
     if len(tds) < 6:
@@ -171,9 +192,7 @@ def process_candidates(candidates: list[Tender], keywords: list[str], cfg: dict,
                     page = browser.new_page()
                     for i, url in enumerate(urls):
                         try:
-                            _goto_with_retry(page, url, log_)
-                            page.wait_for_timeout(1000)
-                            combined_text += "\n" + page.inner_text("body")
+                            combined_text += "\n" + _render_with_retry(page, url, log_)
                             pdf_path = os.path.join(tmpdir, f"doc_{i}.pdf")
                             page.pdf(path=pdf_path)
                             tmp_files.append((url, pdf_path))
