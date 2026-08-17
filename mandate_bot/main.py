@@ -40,8 +40,8 @@ def parse_args():
              "tenders, even if already marked as seen (listing order = newest first).",
     )
     parser.add_argument(
-        "--source", choices=["all", "punjab", "bppt", "kppra"], default="all",
-        help="Run only one source instead of all three.",
+        "--source", choices=["all", "punjab", "bppt", "kppra", "epms"], default="all",
+        help="Run only one source instead of all four.",
     )
     return parser.parse_args()
 
@@ -205,9 +205,38 @@ def run():
         kppra_matches = kppra_module.process_candidates(new_kppra, keywords, cfg, state, log)
         match_count += kppra_matches
 
+    epms_cfg = cfg.get("epms", {})
+    epms_checked = 0
+    if epms_cfg.get("enabled") and args.source in ("all", "epms"):
+        from . import epms as epms_module
+
+        epms_tenders = epms_module.fetch_all(
+            base_url=epms_cfg["base_url"],
+            listing_path=epms_cfg["listing_path"],
+            categories=epms_cfg.get("categories", ["Consultancy Services", "Non-consultancy Services"]),
+            verify_ssl=not epms_cfg.get("insecure_skip_verify", False),
+            request_delay=epms_cfg.get("request_delay_seconds", 0.5),
+            max_pages=epms_cfg.get("max_pages", 20),
+        )
+        log.info("EPMS: fetched %d candidate tenders", len(epms_tenders))
+
+        if args.rescan_last > 0:
+            forced = epms_tenders[:args.rescan_last]
+            for t in forced:
+                state.unmark(t.key)
+            log.info("EPMS: --rescan-last %d: force-unmarked %d candidates for re-scan",
+                      args.rescan_last, len(forced))
+
+        new_epms = [t for t in epms_tenders if not state.has(t.key)]
+        epms_checked = len(new_epms)
+        log.info("EPMS: %d are new (not previously processed)", epms_checked)
+
+        epms_matches = epms_module.process_candidates(new_epms, keywords, cfg, state, log)
+        match_count += epms_matches
+
     state.save()
     log.info("Run complete. %d new matches found out of %d new candidates checked.",
-              match_count, len(new_candidates) + bppt_checked + kppra_checked)
+              match_count, len(new_candidates) + bppt_checked + kppra_checked + epms_checked)
 
 
 if __name__ == "__main__":

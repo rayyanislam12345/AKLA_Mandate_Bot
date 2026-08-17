@@ -85,6 +85,20 @@ kppra:
   max_pages: 20
   request_delay_seconds: 0.5
 
+# Federal PPRA e-Publish & Monitoring System (epms.ppra.gov.pk) — Pakistan's
+# national procurement portal. Classic server-rendered pages, plain-requests
+# scrapeable, and (unlike KPPRA) its category filter actually works
+# server-side, so only real candidates get fetched instead of every tender.
+epms:
+  enabled: true
+  base_url: "https://epms.ppra.gov.pk/"
+  listing_path: "public/tenders/active-tenders"
+  categories:
+    - "Consultancy Services"
+    - "Non-consultancy Services"
+  max_pages: 20
+  request_delay_seconds: 0.5
+
 paths:
   download_dir: "downloads"
   state_file: "state/seen.json"
