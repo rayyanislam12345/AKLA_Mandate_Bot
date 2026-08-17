@@ -111,13 +111,16 @@ def fetch_all(base_url: str, listing_path: str, categories: list[str],
     return deduped
 
 
-def _extract_doc_links(session: requests.Session, base_url: str, detail_url: str, verify_ssl: bool) -> list[str]:
+def _extract_doc_links(session: requests.Session, base_url: str, detail_url: str, verify_ssl: bool) -> list[tuple[str, str]]:
+    """Returns (label, url) pairs, e.g. ("Download Tender Document", "...").
+    The label is what lets callers exclude the "Advertisement" doc from
+    keyword matching — see process_candidates."""
     resp = session.get(detail_url, verify=verify_ssl, timeout=30)
     resp.raise_for_status()
     soup = BeautifulSoup(resp.text, "lxml")
     links = []
     for a in soup.find_all("a", href=re.compile(r"/pdf\?file=")):
-        links.append(urljoin(base_url, a["href"]))
+        links.append((a.get_text(strip=True), urljoin(base_url, a["href"])))
     return links
 
 
@@ -133,27 +136,33 @@ def process_candidates(candidates: list[Tender], keywords: list[str], cfg: dict,
     match_count = 0
     for t in candidates:
         try:
-            doc_urls = _extract_doc_links(session, base_url, t.notice_url, verify_ssl)
-        except Exception:
-            log_.warning("Failed to load detail page for %s", t.title)
+            doc_links = _extract_doc_links(session, base_url, t.notice_url, verify_ssl)
+        except Exception as exc:
+            log_.warning("Failed to load detail page for %s: %s", t.title, exc)
             continue  # leave unmarked, retry next run
         time.sleep(request_delay)
 
-        if not doc_urls:
+        if not doc_links:
             state.mark(t.key)
             continue
 
+        doc_urls = [url for _, url in doc_links]
         combined_text = ""
         tmp_files = []
         any_failed = False
         try:
             with tempfile.TemporaryDirectory() as tmpdir:
-                for i, url in enumerate(doc_urls):
+                for i, (label, url) in enumerate(doc_links):
                     tmp_path = os.path.join(tmpdir, f"doc_{i}.pdf")
                     ok = download_pdf(session, url, tmp_path, verify_ssl=verify_ssl)
                     if ok:
                         tmp_files.append((url, tmp_path))
-                        combined_text += "\n" + extract_text(tmp_path)
+                        # The "Advertisement" doc is a scanned newspaper page —
+                        # it can carry unrelated adjacent articles, so it's
+                        # downloaded/saved like any other doc but excluded
+                        # from the keyword-match decision.
+                        if "advertisement" not in label.lower():
+                            combined_text += "\n" + extract_text(tmp_path)
                     else:
                         any_failed = True
                     time.sleep(request_delay)

@@ -28,7 +28,7 @@ from PIL import Image
 from .logging_utils import append_match_log, slugify
 from .matcher import find_matches
 from .models import Tender
-from .pdf_utils import extract_text
+from .pdf_utils import DOWNLOAD_RETRIES, DOWNLOAD_RETRY_BACKOFF, extract_text
 
 log = logging.getLogger("mandate_bot.kppra")
 
@@ -137,8 +137,22 @@ def fetch_all(base_url: str, listing_path: str, categories: list[str],
 
 
 def _extract_text_any(session: requests.Session, url: str, tmp_path: str, verify_ssl: bool) -> str:
-    resp = session.get(url, verify=verify_ssl, timeout=60)
-    resp.raise_for_status()
+    last_exc = None
+    for attempt in range(DOWNLOAD_RETRIES):
+        try:
+            resp = session.get(url, verify=verify_ssl, timeout=60)
+            resp.raise_for_status()
+            break
+        except requests.RequestException as exc:
+            last_exc = exc
+            if attempt < DOWNLOAD_RETRIES - 1:
+                delay = DOWNLOAD_RETRY_BACKOFF[attempt]
+                log.warning("Download of %s failed (attempt %d/%d): %s — retrying in %ds",
+                            url, attempt + 1, DOWNLOAD_RETRIES, exc, delay)
+                time.sleep(delay)
+    else:
+        raise last_exc
+
     with open(tmp_path, "wb") as f:
         f.write(resp.content)
 
@@ -182,8 +196,8 @@ def process_candidates(candidates: list[Tender], keywords: list[str], cfg: dict,
                         text = _extract_text_any(session, url, tmp_path, verify_ssl)
                         combined_text += "\n" + text
                         tmp_files.append((url, tmp_path))
-                    except Exception:
-                        log_.warning("Failed to download/read %s", url)
+                    except Exception as exc:
+                        log_.warning("Failed to download/read %s: %s", url, exc)
                         any_failed = True
                     time.sleep(request_delay)
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 
 import pdfplumber
 import pytesseract
@@ -10,13 +11,29 @@ from pdf2image import convert_from_path
 
 log = logging.getLogger("mandate_bot.pdf")
 
+DOWNLOAD_RETRIES = 3
+DOWNLOAD_RETRY_BACKOFF = [2, 5, 10]  # seconds, one per retry attempt
+
 
 def download_pdf(session: requests.Session, url: str, dest_path: str, verify_ssl: bool = True) -> bool:
-    try:
-        resp = session.get(url, verify=verify_ssl, timeout=60)
-        resp.raise_for_status()
-    except requests.RequestException as exc:
-        log.warning("Failed to download %s: %s", url, exc)
+    """Download with retries — a network blip (connection reset, timeout)
+    shouldn't cost an entire tender when it'll likely succeed a few seconds
+    later."""
+    last_exc = None
+    for attempt in range(DOWNLOAD_RETRIES):
+        try:
+            resp = session.get(url, verify=verify_ssl, timeout=60)
+            resp.raise_for_status()
+            break
+        except requests.RequestException as exc:
+            last_exc = exc
+            if attempt < DOWNLOAD_RETRIES - 1:
+                delay = DOWNLOAD_RETRY_BACKOFF[attempt]
+                log.warning("Download of %s failed (attempt %d/%d): %s — retrying in %ds",
+                            url, attempt + 1, DOWNLOAD_RETRIES, exc, delay)
+                time.sleep(delay)
+    else:
+        log.warning("Failed to download %s after %d attempts: %s", url, DOWNLOAD_RETRIES, last_exc)
         return False
 
     content_type = resp.headers.get("Content-Type", "")
