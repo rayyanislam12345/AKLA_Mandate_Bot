@@ -160,6 +160,7 @@ def process_candidates(candidates: list[Tender], keywords: list[str], cfg: dict,
 
         combined_text = ""
         tmp_files = []
+        any_failed = False
         try:
             with tempfile.TemporaryDirectory() as tmpdir:
                 for i, url in enumerate(urls):
@@ -171,6 +172,7 @@ def process_candidates(candidates: list[Tender], keywords: list[str], cfg: dict,
                         tmp_files.append((url, tmp_path))
                     except Exception:
                         log_.warning("Failed to download/read %s", url)
+                        any_failed = True
                     time.sleep(request_delay)
 
                 hits = find_matches(combined_text, keywords)
@@ -203,6 +205,9 @@ def process_candidates(candidates: list[Tender], keywords: list[str], cfg: dict,
             log_.exception("Error processing KPPRA tender %s", t.title)
             continue
 
-        state.mark(t.key)
+        if any_failed:
+            log_.warning("Leaving %s unmarked (seen) for retry — one or more documents failed to download/read", t.title)
+        else:
+            state.mark(t.key)
 
     return match_count

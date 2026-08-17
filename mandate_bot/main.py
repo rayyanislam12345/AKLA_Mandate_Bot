@@ -94,6 +94,7 @@ def run():
 
         combined_text = ""
         tmp_files = []
+        any_failed = False
         try:
             with tempfile.TemporaryDirectory() as tmpdir:
                 for i, url in enumerate(urls):
@@ -102,6 +103,8 @@ def run():
                     if ok:
                         tmp_files.append((url, tmp_path))
                         combined_text += "\n" + extract_text(tmp_path)
+                    else:
+                        any_failed = True
                     time.sleep(src.get("request_delay_seconds", 1.5))
 
                 hits = find_matches(combined_text, keywords)
@@ -134,7 +137,10 @@ def run():
             log.exception("Error processing tender %s", t.title)
             continue
 
-        state.mark(t.key)
+        if any_failed:
+            log.warning("Leaving %s unmarked (seen) for retry — one or more documents failed to download", t.title)
+        else:
+            state.mark(t.key)
 
     bppt_cfg = cfg.get("bppt", {})
     bppt_checked = 0

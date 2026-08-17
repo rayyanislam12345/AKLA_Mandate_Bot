@@ -143,6 +143,7 @@ def process_candidates(candidates: list[Tender], keywords: list[str], cfg: dict,
 
             combined_text = ""
             tmp_files = []
+            any_failed = False
             try:
                 with tempfile.TemporaryDirectory() as tmpdir:
                     page = browser.new_page()
@@ -156,6 +157,7 @@ def process_candidates(candidates: list[Tender], keywords: list[str], cfg: dict,
                             tmp_files.append((url, pdf_path))
                         except Exception:
                             log_.exception("Failed to render %s", url)
+                            any_failed = True
                         time.sleep(request_delay)
                     page.close()
 
@@ -189,7 +191,10 @@ def process_candidates(candidates: list[Tender], keywords: list[str], cfg: dict,
                 log_.exception("Error processing BPPT tender %s", t.title)
                 continue
 
-            state.mark(t.key)
+            if any_failed:
+                log_.warning("Leaving %s unmarked (seen) for retry — one or more documents failed to render", t.title)
+            else:
+                state.mark(t.key)
 
         browser.close()
 
