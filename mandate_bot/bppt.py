@@ -29,6 +29,28 @@ from .models import Tender
 
 log = logging.getLogger("mandate_bot.bppt")
 
+GOTO_RETRIES = 3
+GOTO_RETRY_BACKOFF = [2, 5, 10]  # seconds, one per retry attempt
+
+
+def _goto_with_retry(page, url: str, log_: logging.Logger):
+    """Navigate with retries — WiFi drops/roaming show up as
+    net::ERR_NETWORK_CHANGED (and similar transient net:: errors) and are
+    worth a few attempts before giving up on a document."""
+    last_exc = None
+    for attempt in range(GOTO_RETRIES):
+        try:
+            page.goto(url, wait_until="networkidle", timeout=30000)
+            return
+        except Exception as exc:
+            last_exc = exc
+            if attempt < GOTO_RETRIES - 1:
+                delay = GOTO_RETRY_BACKOFF[attempt]
+                log_.warning("Navigation to %s failed (attempt %d/%d): %s — retrying in %ds",
+                             url, attempt + 1, GOTO_RETRIES, exc, delay)
+                time.sleep(delay)
+    raise last_exc
+
 
 def _parse_row(row, category: str, base_url: str) -> Tender | None:
     tds = row.find_all("td", recursive=False)
@@ -71,7 +93,7 @@ def fetch_all(base_url: str, listing_path: str, categories: list[str],
         browser = p.chromium.launch()
         page = browser.new_page()
         log.info("Loading %s", listing_url)
-        page.goto(listing_url, wait_until="networkidle", timeout=30000)
+        _goto_with_retry(page, listing_url, log)
         page.wait_for_timeout(1500)
 
         for category in categories:
@@ -149,7 +171,7 @@ def process_candidates(candidates: list[Tender], keywords: list[str], cfg: dict,
                     page = browser.new_page()
                     for i, url in enumerate(urls):
                         try:
-                            page.goto(url, wait_until="networkidle", timeout=30000)
+                            _goto_with_retry(page, url, log_)
                             page.wait_for_timeout(1000)
                             combined_text += "\n" + page.inner_text("body")
                             pdf_path = os.path.join(tmpdir, f"doc_{i}.pdf")
