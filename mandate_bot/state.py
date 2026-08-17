@@ -21,7 +21,10 @@ class SeenState:
         return key in self._seen
 
     def mark(self, key: str):
+        """Marks and immediately persists — long runs can be interrupted
+        partway through, and progress up to that point should survive."""
         self._seen.add(key)
+        self.save()
 
     def unmark(self, key: str):
         self._seen.discard(key)
