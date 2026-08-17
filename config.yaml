@@ -98,6 +98,22 @@ epms:
   max_pages: 20
   request_delay_seconds: 0.5
 
+# Sindh Public Procurement Regulatory Authority portal (ppms.pprasindh.gov.pk)
+# A JSF/PrimeFaces app — every document download is a stateful form POST,
+# not a plain link, so this source uses Playwright (like BPPT). No
+# procurement-category taxonomy is exposed, so all Active-status tenders are
+# scanned (only ~4 of ~2800 total tenders are Active at any given time — the
+# rest are Archived/Cancelled history, so this stays a small, fast source).
+# This portal's TLS cert is missing its intermediate chain (browser reports
+# "unable to get local issuer certificate") — handled the same way as BPPT,
+# via Playwright's ignore_https_errors, no config flag needed here.
+sindh:
+  enabled: true
+  base_url: "https://ppms.pprasindh.gov.pk/"
+  listing_path: "PPMS/public/portal/notice-inviting-tender"
+  max_pages: 10
+  request_delay_seconds: 1.0
+
 paths:
   download_dir: "downloads"
   state_file: "state/seen.json"

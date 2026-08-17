@@ -40,8 +40,8 @@ def parse_args():
              "tenders, even if already marked as seen (listing order = newest first).",
     )
     parser.add_argument(
-        "--source", choices=["all", "punjab", "bppt", "kppra", "epms"], default="all",
-        help="Run only one source instead of all four.",
+        "--source", choices=["all", "punjab", "bppt", "kppra", "epms", "sindh"], default="all",
+        help="Run only one source instead of all five.",
     )
     return parser.parse_args()
 
@@ -236,9 +236,36 @@ def run():
         epms_matches = epms_module.process_candidates(new_epms, keywords, cfg, state, log)
         match_count += epms_matches
 
+    sindh_cfg = cfg.get("sindh", {})
+    sindh_checked = 0
+    if sindh_cfg.get("enabled") and args.source in ("all", "sindh"):
+        from . import sindh as sindh_module
+
+        sindh_tenders = sindh_module.fetch_all(
+            base_url=sindh_cfg["base_url"],
+            listing_path=sindh_cfg["listing_path"],
+            request_delay=sindh_cfg.get("request_delay_seconds", 1.0),
+            max_pages=sindh_cfg.get("max_pages", 10),
+        )
+        log.info("Sindh: fetched %d candidate tenders", len(sindh_tenders))
+
+        if args.rescan_last > 0:
+            forced = sindh_tenders[:args.rescan_last]
+            for t in forced:
+                state.unmark(t.key)
+            log.info("Sindh: --rescan-last %d: force-unmarked %d candidates for re-scan",
+                      args.rescan_last, len(forced))
+
+        new_sindh = [t for t in sindh_tenders if not state.has(t.key)]
+        sindh_checked = len(new_sindh)
+        log.info("Sindh: %d are new (not previously processed)", sindh_checked)
+
+        sindh_matches = sindh_module.process_candidates(new_sindh, keywords, cfg, state, log)
+        match_count += sindh_matches
+
     state.save()
     log.info("Run complete. %d new matches found out of %d new candidates checked.",
-              match_count, len(new_candidates) + bppt_checked + kppra_checked + epms_checked)
+              match_count, len(new_candidates) + bppt_checked + kppra_checked + epms_checked + sindh_checked)
 
 
 if __name__ == "__main__":

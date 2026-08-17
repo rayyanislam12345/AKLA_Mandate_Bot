@@ -18,5 +18,9 @@ class Tender:
 
     @property
     def key(self) -> str:
-        """Stable dedupe key: prefer the bidding document URL, else the notice URL."""
-        return self.document_url or self.notice_url or f"{self.title}|{self.department}|{self.publish_date}"
+        """Stable dedupe key: prefer the bidding document URL, then the
+        notice URL, then the portal's own reference number (for sources
+        with no per-tender URL at listing time, e.g. Sindh)."""
+        return (self.document_url or self.notice_url
+                or (f"{self.source}:{self.tender_ref}" if self.tender_ref else None)
+                or f"{self.title}|{self.department}|{self.publish_date}")

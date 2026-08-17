@@ -1,6 +1,6 @@
 # Mandate Bot
 
-Scrapes active tenders from four government procurement portals, downloads
+Scrapes active tenders from five government procurement portals, downloads
 tender documents (plus any corrigenda/addenda/minutes) for anything tagged
 as a legal-adjacent procurement type, scans the text for legal-services
 keywords, saves matches into `downloads/`, and generates a browsable local
@@ -11,6 +11,7 @@ Sources:
 - **Balochistan Public Procurement Regulatory Authority** (`bpptwo.vdc.services`)
 - **Khyber Pakhtunkhwa Public Procurement Regulatory Authority** (`kppra.gov.pk`)
 - **Federal PPRA e-Publish & Monitoring System** (`epms.ppra.gov.pk`)
+- **Sindh Public Procurement Regulatory Authority** (`ppms.pprasindh.gov.pk`)
 
 ## How it works
 
@@ -55,6 +56,19 @@ only real Consultancy/Non-consultancy Services candidates get fetched
 instead of classifying every tender individually. Each tender's detail page
 is scanned for every `/pdf?file=...` link present (not just a fixed pair),
 so corrigendum documents are picked up automatically whenever they exist.
+
+### Sindh (`mandate_bot/sindh.py`)
+A JSF/PrimeFaces app (Java, session/ViewState-based) — every document
+download is a stateful form POST (`PrimeFaces.addSubmitParam(...).submit(...)`),
+not a plain link, so like BPPT this source is scraped with Playwright. No
+procurement-category taxonomy is exposed at all, but only a small handful of
+this portal's ~2800 total tenders are ever Status=Active at a given time
+(the rest are Archived/Cancelled history), so every Active tender is
+scanned rather than needing a category pre-filter. Each tender can bundle
+several items/schemes, each with its own Bidding Document — all of them are
+downloaded and matched. Committee-approval documents and newspaper-ad scans
+are deliberately skipped (administrative noise / same false-positive risk
+as EPMS's advertisement docs, respectively).
 
 ### All sources
 The combined text is checked against the keyword list in `config.yaml`. If
