@@ -107,6 +107,15 @@ def fetch_all(base_url: str, listing_path: str, categories: list[str],
                     return None
                 return urljoin(base_url, f"staff/force_download.php?file=dept/upload/{filename}")
 
+            # Corrigenda/addenda/meeting-minutes docs, when present, aren't
+            # shown in the listing table at all — only this JSON detail call
+            # reveals them. Not every tender has these.
+            extra_urls = [u for u in (
+                doc_url(detail.get("corrigendum_doc")),
+                doc_url(detail.get("addendum_doc")),
+                doc_url(detail.get("mom_doc")),
+            ) if u]
+
             tenders.append(Tender(
                 notice_type="Tender",
                 title=row["description"] or detail.get("tender_descp", ""),
@@ -118,6 +127,7 @@ def fetch_all(base_url: str, listing_path: str, categories: list[str],
                 notice_url=doc_url(detail.get("tender_file")),
                 document_url=doc_url(detail.get("bidding_doc")) or doc_url(detail.get("tender_file")),
                 source="kppra",
+                extra_urls=extra_urls,
             ))
 
         page_num += 1
@@ -152,8 +162,9 @@ def process_candidates(candidates: list[Tender], keywords: list[str], cfg: dict,
     for t in candidates:
         # document_url falls back to the same file as notice_url when no
         # separate bidding document exists (see fetch_all) — dedupe so we
-        # don't download/OCR the identical file twice.
-        urls = list(dict.fromkeys(u for u in (t.document_url, t.notice_url) if u))
+        # don't download/OCR the identical file twice. extra_urls carries
+        # any corrigenda/addenda/minutes found on the detail page.
+        urls = list(dict.fromkeys(u for u in (t.document_url, t.notice_url, *t.extra_urls) if u))
         if not urls:
             state.mark(t.key)
             continue
