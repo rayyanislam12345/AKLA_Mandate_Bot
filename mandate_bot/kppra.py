@@ -23,6 +23,7 @@ from urllib.parse import urljoin
 import requests
 from bs4 import BeautifulSoup
 
+from .http_utils import get_with_retry
 from .logging_utils import append_match_log, slugify
 from .matcher import find_matches
 from .models import Tender
@@ -60,18 +61,13 @@ def _parse_listing_rows(html: str) -> list[dict]:
 
 def _fetch_detail(session: requests.Session, base_url: str, tender_id: str, verify_ssl: bool) -> dict | None:
     url = urljoin(base_url, f"includes/class.tender.php?getTenderDetails=yes&tender_id={tender_id}")
-    for attempt in range(2):
-        try:
-            resp = session.get(url, verify=verify_ssl, timeout=20)
-            resp.raise_for_status()
-            data = resp.json()
-            return data[0] if data else None
-        except Exception as exc:
-            if attempt == 0:
-                time.sleep(1)
-                continue
-            log.warning("Failed to fetch tender detail %s: %s", tender_id, exc)
-            return None
+    try:
+        resp = get_with_retry(session, url, log, verify=verify_ssl, timeout=20)
+        data = resp.json()
+        return data[0] if data else None
+    except Exception as exc:
+        log.warning("Failed to fetch tender detail %s: %s", tender_id, exc)
+        return None
 
 
 def fetch_all(base_url: str, listing_path: str, categories: list[str],
@@ -84,8 +80,11 @@ def fetch_all(base_url: str, listing_path: str, categories: list[str],
     page_num = 1
     while page_num <= max_pages:
         url = urljoin(base_url, f"{listing_path}?p={page_num}")
-        resp = session.get(url, verify=verify_ssl, timeout=30)
-        resp.raise_for_status()
+        try:
+            resp = get_with_retry(session, url, log, verify=verify_ssl, timeout=30)
+        except Exception:
+            log.exception("Failed to fetch KPPRA listing page %d after retries, stopping here", page_num)
+            break
         rows = _parse_listing_rows(resp.text)
         if not rows:
             break

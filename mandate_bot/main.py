@@ -65,32 +65,36 @@ def run():
 
     match_count = 0
     new_candidates = []
+    scraper = None
+    src = cfg["source"]
     if args.source in ("all", "punjab"):
-        src = cfg["source"]
-        scraper = TenderScraper(
-            base_url=src["base_url"],
-            listing_path=src["listing_path"],
-            verify_ssl=not src.get("insecure_skip_verify", False),
-            request_delay=src.get("request_delay_seconds", 1.5),
-            max_pages=src.get("max_pages", 20),
-        )
-        categories = {c.lower() for c in cfg.get("categories", [])}
+        try:
+            scraper = TenderScraper(
+                base_url=src["base_url"],
+                listing_path=src["listing_path"],
+                verify_ssl=not src.get("insecure_skip_verify", False),
+                request_delay=src.get("request_delay_seconds", 1.5),
+                max_pages=src.get("max_pages", 20),
+            )
+            categories = {c.lower() for c in cfg.get("categories", [])}
 
-        tenders = scraper.fetch_all()
-        log.info("Fetched %d tenders total", len(tenders))
+            tenders = scraper.fetch_all()
+            log.info("Fetched %d tenders total", len(tenders))
 
-        candidates = [t for t in tenders if t.category.lower() in categories]
-        log.info("%d tenders match category filter %s", len(candidates), sorted(categories))
+            candidates = [t for t in tenders if t.category.lower() in categories]
+            log.info("%d tenders match category filter %s", len(candidates), sorted(categories))
 
-        if args.rescan_last > 0:
-            forced = candidates[:args.rescan_last]
-            for t in forced:
-                state.unmark(t.key)
-            log.info("--rescan-last %d: force-unmarked %d candidates for re-scan",
-                      args.rescan_last, len(forced))
+            if args.rescan_last > 0:
+                forced = candidates[:args.rescan_last]
+                for t in forced:
+                    state.unmark(t.key)
+                log.info("--rescan-last %d: force-unmarked %d candidates for re-scan",
+                          args.rescan_last, len(forced))
 
-        new_candidates = [t for t in candidates if not state.has(t.key)]
-        log.info("%d are new (not previously processed)", len(new_candidates))
+            new_candidates = [t for t in candidates if not state.has(t.key)]
+            log.info("%d are new (not previously processed)", len(new_candidates))
+        except Exception:
+            log.exception("Punjab source failed, skipping the rest of it and moving on")
 
     for t in new_candidates:
         urls = [u for u in (t.document_url, t.notice_url) if u]
@@ -153,142 +157,157 @@ def run():
     bppt_cfg = cfg.get("bppt", {})
     bppt_checked = 0
     if bppt_cfg.get("enabled") and args.source in ("all", "bppt"):
-        from . import bppt as bppt_module
+        try:
+            from . import bppt as bppt_module
 
-        bppt_tenders = bppt_module.fetch_all(
-            base_url=bppt_cfg["base_url"],
-            listing_path=bppt_cfg["listing_path"],
-            categories=bppt_cfg.get("categories", ["Services"]),
-            request_delay=bppt_cfg.get("request_delay_seconds", 1.0),
-            max_pages=bppt_cfg.get("max_pages", 30),
-        )
-        log.info("BPPT: fetched %d candidate tenders", len(bppt_tenders))
+            bppt_tenders = bppt_module.fetch_all(
+                base_url=bppt_cfg["base_url"],
+                listing_path=bppt_cfg["listing_path"],
+                categories=bppt_cfg.get("categories", ["Services"]),
+                request_delay=bppt_cfg.get("request_delay_seconds", 1.0),
+                max_pages=bppt_cfg.get("max_pages", 30),
+            )
+            log.info("BPPT: fetched %d candidate tenders", len(bppt_tenders))
 
-        if args.rescan_last > 0:
-            forced = bppt_tenders[:args.rescan_last]
-            for t in forced:
-                state.unmark(t.key)
-            log.info("BPPT: --rescan-last %d: force-unmarked %d candidates for re-scan",
-                      args.rescan_last, len(forced))
+            if args.rescan_last > 0:
+                forced = bppt_tenders[:args.rescan_last]
+                for t in forced:
+                    state.unmark(t.key)
+                log.info("BPPT: --rescan-last %d: force-unmarked %d candidates for re-scan",
+                          args.rescan_last, len(forced))
 
-        new_bppt = [t for t in bppt_tenders if not state.has(t.key)]
-        bppt_checked = len(new_bppt)
-        log.info("BPPT: %d are new (not previously processed)", bppt_checked)
+            new_bppt = [t for t in bppt_tenders if not state.has(t.key)]
+            bppt_checked = len(new_bppt)
+            log.info("BPPT: %d are new (not previously processed)", bppt_checked)
 
-        bppt_matches = bppt_module.process_candidates(new_bppt, keywords, cfg, state, log)
-        match_count += bppt_matches
+            bppt_matches = bppt_module.process_candidates(new_bppt, keywords, cfg, state, log)
+            match_count += bppt_matches
+        except Exception:
+            log.exception("BPPT source failed, skipping the rest of it and moving on")
 
     kppra_cfg = cfg.get("kppra", {})
     kppra_checked = 0
     if kppra_cfg.get("enabled") and args.source in ("all", "kppra"):
-        from . import kppra as kppra_module
+        try:
+            from . import kppra as kppra_module
 
-        kppra_tenders = kppra_module.fetch_all(
-            base_url=kppra_cfg["base_url"],
-            listing_path=kppra_cfg["listing_path"],
-            categories=kppra_cfg.get("categories", ["Consulting Services", "NON-Consulting Services"]),
-            verify_ssl=not kppra_cfg.get("insecure_skip_verify", False),
-            request_delay=kppra_cfg.get("request_delay_seconds", 0.5),
-            max_pages=kppra_cfg.get("max_pages", 20),
-        )
-        log.info("KPPRA: fetched %d candidate tenders", len(kppra_tenders))
+            kppra_tenders = kppra_module.fetch_all(
+                base_url=kppra_cfg["base_url"],
+                listing_path=kppra_cfg["listing_path"],
+                categories=kppra_cfg.get("categories", ["Consulting Services", "NON-Consulting Services"]),
+                verify_ssl=not kppra_cfg.get("insecure_skip_verify", False),
+                request_delay=kppra_cfg.get("request_delay_seconds", 0.5),
+                max_pages=kppra_cfg.get("max_pages", 20),
+            )
+            log.info("KPPRA: fetched %d candidate tenders", len(kppra_tenders))
 
-        if args.rescan_last > 0:
-            forced = kppra_tenders[:args.rescan_last]
-            for t in forced:
-                state.unmark(t.key)
-            log.info("KPPRA: --rescan-last %d: force-unmarked %d candidates for re-scan",
-                      args.rescan_last, len(forced))
+            if args.rescan_last > 0:
+                forced = kppra_tenders[:args.rescan_last]
+                for t in forced:
+                    state.unmark(t.key)
+                log.info("KPPRA: --rescan-last %d: force-unmarked %d candidates for re-scan",
+                          args.rescan_last, len(forced))
 
-        new_kppra = [t for t in kppra_tenders if not state.has(t.key)]
-        kppra_checked = len(new_kppra)
-        log.info("KPPRA: %d are new (not previously processed)", kppra_checked)
+            new_kppra = [t for t in kppra_tenders if not state.has(t.key)]
+            kppra_checked = len(new_kppra)
+            log.info("KPPRA: %d are new (not previously processed)", kppra_checked)
 
-        kppra_matches = kppra_module.process_candidates(new_kppra, keywords, cfg, state, log)
-        match_count += kppra_matches
+            kppra_matches = kppra_module.process_candidates(new_kppra, keywords, cfg, state, log)
+            match_count += kppra_matches
+        except Exception:
+            log.exception("KPPRA source failed, skipping the rest of it and moving on")
 
     epms_cfg = cfg.get("epms", {})
     epms_checked = 0
     if epms_cfg.get("enabled") and args.source in ("all", "epms"):
-        from . import epms as epms_module
+        try:
+            from . import epms as epms_module
 
-        epms_tenders = epms_module.fetch_all(
-            base_url=epms_cfg["base_url"],
-            listing_path=epms_cfg["listing_path"],
-            categories=epms_cfg.get("categories", ["Consultancy Services", "Non-consultancy Services"]),
-            verify_ssl=not epms_cfg.get("insecure_skip_verify", False),
-            request_delay=epms_cfg.get("request_delay_seconds", 0.5),
-            max_pages=epms_cfg.get("max_pages", 20),
-        )
-        log.info("EPMS: fetched %d candidate tenders", len(epms_tenders))
+            epms_tenders = epms_module.fetch_all(
+                base_url=epms_cfg["base_url"],
+                listing_path=epms_cfg["listing_path"],
+                categories=epms_cfg.get("categories", ["Consultancy Services", "Non-consultancy Services"]),
+                verify_ssl=not epms_cfg.get("insecure_skip_verify", False),
+                request_delay=epms_cfg.get("request_delay_seconds", 0.5),
+                max_pages=epms_cfg.get("max_pages", 20),
+            )
+            log.info("EPMS: fetched %d candidate tenders", len(epms_tenders))
 
-        if args.rescan_last > 0:
-            forced = epms_tenders[:args.rescan_last]
-            for t in forced:
-                state.unmark(t.key)
-            log.info("EPMS: --rescan-last %d: force-unmarked %d candidates for re-scan",
-                      args.rescan_last, len(forced))
+            if args.rescan_last > 0:
+                forced = epms_tenders[:args.rescan_last]
+                for t in forced:
+                    state.unmark(t.key)
+                log.info("EPMS: --rescan-last %d: force-unmarked %d candidates for re-scan",
+                          args.rescan_last, len(forced))
 
-        new_epms = [t for t in epms_tenders if not state.has(t.key)]
-        epms_checked = len(new_epms)
-        log.info("EPMS: %d are new (not previously processed)", epms_checked)
+            new_epms = [t for t in epms_tenders if not state.has(t.key)]
+            epms_checked = len(new_epms)
+            log.info("EPMS: %d are new (not previously processed)", epms_checked)
 
-        epms_matches = epms_module.process_candidates(new_epms, keywords, cfg, state, log)
-        match_count += epms_matches
+            epms_matches = epms_module.process_candidates(new_epms, keywords, cfg, state, log)
+            match_count += epms_matches
+        except Exception:
+            log.exception("EPMS source failed, skipping the rest of it and moving on")
 
     sindh_cfg = cfg.get("sindh", {})
     sindh_checked = 0
     if sindh_cfg.get("enabled") and args.source in ("all", "sindh"):
-        from . import sindh as sindh_module
+        try:
+            from . import sindh as sindh_module
 
-        sindh_tenders = sindh_module.fetch_all(
-            base_url=sindh_cfg["base_url"],
-            listing_path=sindh_cfg["listing_path"],
-            request_delay=sindh_cfg.get("request_delay_seconds", 1.0),
-            max_pages=sindh_cfg.get("max_pages", 10),
-        )
-        log.info("Sindh: fetched %d candidate tenders", len(sindh_tenders))
+            sindh_tenders = sindh_module.fetch_all(
+                base_url=sindh_cfg["base_url"],
+                listing_path=sindh_cfg["listing_path"],
+                request_delay=sindh_cfg.get("request_delay_seconds", 1.0),
+                max_pages=sindh_cfg.get("max_pages", 10),
+            )
+            log.info("Sindh: fetched %d candidate tenders", len(sindh_tenders))
 
-        if args.rescan_last > 0:
-            forced = sindh_tenders[:args.rescan_last]
-            for t in forced:
-                state.unmark(t.key)
-            log.info("Sindh: --rescan-last %d: force-unmarked %d candidates for re-scan",
-                      args.rescan_last, len(forced))
+            if args.rescan_last > 0:
+                forced = sindh_tenders[:args.rescan_last]
+                for t in forced:
+                    state.unmark(t.key)
+                log.info("Sindh: --rescan-last %d: force-unmarked %d candidates for re-scan",
+                          args.rescan_last, len(forced))
 
-        new_sindh = [t for t in sindh_tenders if not state.has(t.key)]
-        sindh_checked = len(new_sindh)
-        log.info("Sindh: %d are new (not previously processed)", sindh_checked)
+            new_sindh = [t for t in sindh_tenders if not state.has(t.key)]
+            sindh_checked = len(new_sindh)
+            log.info("Sindh: %d are new (not previously processed)", sindh_checked)
 
-        sindh_matches = sindh_module.process_candidates(new_sindh, keywords, cfg, state, log)
-        match_count += sindh_matches
+            sindh_matches = sindh_module.process_candidates(new_sindh, keywords, cfg, state, log)
+            match_count += sindh_matches
+        except Exception:
+            log.exception("Sindh source failed, skipping the rest of it and moving on")
 
     pndkp_cfg = cfg.get("pndkp", {})
     pndkp_checked = 0
     if pndkp_cfg.get("enabled") and args.source in ("all", "pndkp"):
-        from . import pndkp as pndkp_module
+        try:
+            from . import pndkp as pndkp_module
 
-        pndkp_tenders = pndkp_module.fetch_all(
-            base_url=pndkp_cfg["base_url"],
-            listing_path=pndkp_cfg["listing_path"],
-            request_delay=pndkp_cfg.get("request_delay_seconds", 1.0),
-            max_pages=pndkp_cfg.get("max_pages", 5),
-        )
-        log.info("PNDKP: fetched %d candidate tenders", len(pndkp_tenders))
+            pndkp_tenders = pndkp_module.fetch_all(
+                base_url=pndkp_cfg["base_url"],
+                listing_path=pndkp_cfg["listing_path"],
+                request_delay=pndkp_cfg.get("request_delay_seconds", 1.0),
+                max_pages=pndkp_cfg.get("max_pages", 5),
+            )
+            log.info("PNDKP: fetched %d candidate tenders", len(pndkp_tenders))
 
-        if args.rescan_last > 0:
-            forced = pndkp_tenders[:args.rescan_last]
-            for t in forced:
-                state.unmark(t.key)
-            log.info("PNDKP: --rescan-last %d: force-unmarked %d candidates for re-scan",
-                      args.rescan_last, len(forced))
+            if args.rescan_last > 0:
+                forced = pndkp_tenders[:args.rescan_last]
+                for t in forced:
+                    state.unmark(t.key)
+                log.info("PNDKP: --rescan-last %d: force-unmarked %d candidates for re-scan",
+                          args.rescan_last, len(forced))
 
-        new_pndkp = [t for t in pndkp_tenders if not state.has(t.key)]
-        pndkp_checked = len(new_pndkp)
-        log.info("PNDKP: %d are new (not previously processed)", pndkp_checked)
+            new_pndkp = [t for t in pndkp_tenders if not state.has(t.key)]
+            pndkp_checked = len(new_pndkp)
+            log.info("PNDKP: %d are new (not previously processed)", pndkp_checked)
 
-        pndkp_matches = pndkp_module.process_candidates(new_pndkp, keywords, cfg, state, log)
-        match_count += pndkp_matches
+            pndkp_matches = pndkp_module.process_candidates(new_pndkp, keywords, cfg, state, log)
+            match_count += pndkp_matches
+        except Exception:
+            log.exception("PNDKP source failed, skipping the rest of it and moving on")
 
     state.save()
     log.info("Run complete. %d new matches found out of %d new candidates checked.",

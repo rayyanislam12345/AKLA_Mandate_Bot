@@ -21,6 +21,7 @@ from urllib.parse import urljoin
 import requests
 from bs4 import BeautifulSoup
 
+from .http_utils import get_with_retry
 from .logging_utils import append_match_log, slugify
 from .matcher import find_matches
 from .models import Tender
@@ -61,8 +62,7 @@ def fetch_all(base_url: str, listing_path: str, request_delay: float = 1.0, max_
     listing_url = urljoin(base_url, listing_path)
 
     log.info("Loading %s", listing_url)
-    resp = session.get(listing_url, timeout=30)
-    resp.raise_for_status()
+    resp = get_with_retry(session, listing_url, log, timeout=30)
     tenders = _parse_listing(resp.text, base_url)
     log.info("PNDKP: %d tenders found", len(tenders))
     return tenders

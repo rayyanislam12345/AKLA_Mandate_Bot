@@ -8,6 +8,7 @@ import requests
 from bs4 import BeautifulSoup
 
 from .aspnet_form import build_postback_payload
+from .http_utils import get_with_retry, post_with_retry
 from .models import Tender
 
 log = logging.getLogger("mandate_bot.scraper")
@@ -38,13 +39,11 @@ class TenderScraper:
             urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
     def _get(self, url: str) -> BeautifulSoup:
-        resp = self.session.get(url, verify=self.verify_ssl, timeout=30)
-        resp.raise_for_status()
+        resp = get_with_retry(self.session, url, log, verify=self.verify_ssl, timeout=30)
         return BeautifulSoup(resp.text, "lxml")
 
     def _post(self, url: str, payload: dict) -> BeautifulSoup:
-        resp = self.session.post(url, data=payload, verify=self.verify_ssl, timeout=30)
-        resp.raise_for_status()
+        resp = post_with_retry(self.session, url, log, data=payload, verify=self.verify_ssl, timeout=30)
         return BeautifulSoup(resp.text, "lxml")
 
     def _parse_rows(self, soup: BeautifulSoup) -> list[Tender]:

@@ -24,6 +24,7 @@ from urllib.parse import urljoin
 import requests
 from bs4 import BeautifulSoup
 
+from .http_utils import get_with_retry
 from .logging_utils import append_match_log, slugify
 from .matcher import find_matches
 from .models import Tender
@@ -88,9 +89,14 @@ def fetch_all(base_url: str, listing_path: str, categories: list[str],
 
         page_num = 1
         while page_num <= max_pages:
-            resp = session.get(listing_url, params={"procurement_category": cat_id, "page": page_num},
-                                verify=verify_ssl, timeout=30)
-            resp.raise_for_status()
+            try:
+                resp = get_with_retry(session, listing_url, log,
+                                       params={"procurement_category": cat_id, "page": page_num},
+                                       verify=verify_ssl, timeout=30)
+            except Exception:
+                log.exception("Failed to fetch EPMS %s page %d after retries, stopping this category",
+                               category, page_num)
+                break
             rows = _parse_listing_rows(resp.text, category)
             if not rows:
                 break
@@ -115,8 +121,7 @@ def _extract_doc_links(session: requests.Session, base_url: str, detail_url: str
     """Returns (label, url) pairs, e.g. ("Download Tender Document", "...").
     The label is what lets callers exclude the "Advertisement" doc from
     keyword matching — see process_candidates."""
-    resp = session.get(detail_url, verify=verify_ssl, timeout=30)
-    resp.raise_for_status()
+    resp = get_with_retry(session, detail_url, log, verify=verify_ssl, timeout=30)
     soup = BeautifulSoup(resp.text, "lxml")
     links = []
     for a in soup.find_all("a", href=re.compile(r"/pdf\?file=")):
