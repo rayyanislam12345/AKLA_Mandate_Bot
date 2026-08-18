@@ -40,8 +40,8 @@ def parse_args():
              "tenders, even if already marked as seen (listing order = newest first).",
     )
     parser.add_argument(
-        "--source", choices=["all", "punjab", "bppt", "kppra", "epms", "sindh", "pndkp"], default="all",
-        help="Run only one source instead of all six.",
+        "--source", choices=["all", "punjab", "bppt", "kppra", "epms", "sindh", "pndkp", "adb"], default="all",
+        help="Run only one source instead of all seven.",
     )
     return parser.parse_args()
 
@@ -309,9 +309,27 @@ def run():
         except Exception:
             log.exception("PNDKP source failed, skipping the rest of it and moving on")
 
+    adb_cfg = cfg.get("adb", {})
+    adb_checked = 0
+    if adb_cfg.get("enabled") and args.source in ("all", "adb"):
+        try:
+            from . import adb as adb_module
+
+            adb_checked, adb_matches = adb_module.run(
+                search_terms=adb_cfg.get("search_terms", ["legal", "law"]),
+                cfg=cfg,
+                state=state,
+                log_=log,
+            )
+            log.info("ADB: %d checked, %d matches", adb_checked, adb_matches)
+            match_count += adb_matches
+        except Exception:
+            log.exception("ADB source failed, skipping the rest of it and moving on")
+
     state.save()
     log.info("Run complete. %d new matches found out of %d new candidates checked.",
-              match_count, len(new_candidates) + bppt_checked + kppra_checked + epms_checked + sindh_checked + pndkp_checked)
+              match_count, len(new_candidates) + bppt_checked + kppra_checked + epms_checked
+              + sindh_checked + pndkp_checked + adb_checked)
 
 
 if __name__ == "__main__":

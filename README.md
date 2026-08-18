@@ -1,8 +1,9 @@
 # Mandate Bot
 
-Scrapes active tenders from six government procurement portals, downloads
-tender documents (plus any corrigenda/addenda/minutes) for anything tagged
-as a legal-adjacent procurement type, scans the text for legal-services
+Scrapes active tenders/opportunities from seven procurement sources
+(domestic Pakistani portals plus one international one), downloads
+documents (plus any corrigenda/addenda/minutes) for anything tagged as a
+legal-adjacent procurement type, scans the text for legal-services
 keywords, saves matches into `downloads/`, and generates a browsable local
 dashboard (`dashboard.html`) of everything found.
 
@@ -13,6 +14,7 @@ Sources:
 - **Federal PPRA e-Publish & Monitoring System** (`epms.ppra.gov.pk`)
 - **Sindh Public Procurement Regulatory Authority** (`ppms.pprasindh.gov.pk`)
 - **KP Planning & Development Department** (`pndkp.gov.pk`)
+- **Asian Development Bank Consultant Management System** (`selfservice.adb.org`) — international-tier
 
 ## How it works
 
@@ -72,7 +74,7 @@ are deliberately skipped (administrative noise / same false-positive risk
 as EPMS's advertisement docs, respectively).
 
 ### KP Planning & Development Department (`mandate_bot/pndkp.py`)
-The simplest source of the six: a WordPress site (WP Download Manager
+The simplest source of the seven: a WordPress site (WP Download Manager
 plugin) where the title and a directly downloadable file URL are both right
 there in the listing page — no detail-page visit, no browser, no pagination
 (the whole tenders category is ~39 files on one page). No department,
@@ -84,6 +86,35 @@ and Word `.docx` files, not just PDFs like every other source assumed.
 `pdf_utils.extract_text_any()` (shared with KPPRA) now branches on the
 downloaded file's actual signature: PDF → existing pdfplumber+OCR pipeline,
 `.docx` → `python-docx`, anything else → OCR directly as an image.
+
+### Asian Development Bank (`mandate_bot/adb.py`)
+An Oracle E-Business Suite / OA Framework app — a different kind of source
+in two ways. First, it's international-tier (loans/grants/TA consulting
+opportunities across ADB member countries), not a domestic Pakistani
+portal. Second, although the URL is a login-capable "self service" portal
+and credentials were provided for it, **they're intentionally unused**:
+browsing, searching, viewing full opportunity details, and downloading
+Terms of Reference are all public — login is only needed to actually
+submit a bid ("Express Interest"), which this bot never does. If that ever
+changes, credentials live in `secrets.yaml` (gitignored, never committed).
+
+Matching also works differently here: the site's "Search by Expertise"
+box searches a tag field curated by ADB staff, not generic document text,
+so every result returned by the `adb.search_terms` searches (`legal`,
+`law` by default) is treated as a match directly — no local keyword pass,
+since the existing Pakistan-tuned keyword list doesn't match ADB's
+phrasing style (e.g. "Legal Expert" vs. "hiring of legal") and would
+otherwise hide genuinely relevant results. The "Terms of Reference" tab
+always has the full content rendered inline regardless of whether a
+separate file attachment also exists, so it's always captured as a PDF
+snapshot (same `page.pdf()` pattern as BPPT); any real attachment file is
+downloaded as well when present.
+
+Since the search box can't look up a specific opportunity by ID afterward,
+this source runs fetch and document-capture as one pass per search term
+(already-seen titles are skipped before ever clicking into them, so
+re-runs stay cheap) rather than the two-phase split every other source
+uses.
 
 ### All sources
 The combined text is checked against the keyword list in `config.yaml`. If
@@ -123,13 +154,18 @@ cd "Mandate Bot"
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-python3 -m playwright install chromium   # one-time browser download (~300MB), needed for the BPPT source
+python3 -m playwright install chromium   # one-time browser download (~300MB), needed for BPPT/Sindh/ADB
 ```
 
-Also needs, via Homebrew (for OCR on the Punjab source):
+Also needs, via Homebrew (for OCR on Punjab/KPPRA/PNDKP):
 ```bash
 brew install tesseract poppler
 ```
+
+If any source ever needs login credentials (currently none do — see
+`mandate_bot/adb.py`'s docstring), put them in `secrets.yaml` at the project
+root (gitignored, never committed — see the template comment at the top of
+that file if you need to create it).
 
 ## Run manually
 
@@ -138,9 +174,12 @@ brew install tesseract poppler
 # or: source .venv/bin/activate && python3 -m mandate_bot.main
 ```
 
-A full run (both sources) currently takes on the order of tens of minutes,
-since every candidate document is downloaded/rendered and read individually
-with a polite delay between requests — this is normal, let it finish.
+A full run (all seven sources) currently takes on the order of tens of
+minutes to a few hours depending on network conditions, since every
+candidate document is downloaded/rendered and read individually with a
+polite delay between requests — this is normal, let it finish. Each source
+saves its progress incrementally, so an interrupted run can be safely
+resumed with `./run.sh` again.
 
 Output:
 - Matched documents: `downloads/`

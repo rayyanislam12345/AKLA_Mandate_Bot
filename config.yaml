@@ -133,6 +133,25 @@ pndkp:
   max_pages: 5
   request_delay_seconds: 1.0
 
+# Asian Development Bank Consultant Management System (selfservice.adb.org)
+# International-tier consulting opportunities (loans/grants/TA projects
+# across ADB member countries) — a different tier from the domestic
+# Pakistani portals. Despite being a "self service" (login-capable) portal,
+# searching, viewing full opportunity details, and downloading Terms of
+# Reference documents are all public — login is only needed to actually
+# submit a bid ("Express Interest"), which this bot never does. Credentials
+# were provided but are intentionally unused — see secrets.yaml.
+#
+# The site's own "Search by Expertise" field only searches its Expertise
+# tag (not free text), so search_terms here should stay short/generic
+# rather than full phrases — the usual keywords list below is still applied
+# afterward against each opportunity's downloaded Terms of Reference.
+adb:
+  enabled: true
+  search_terms:
+    - "legal"
+    - "law"
+
 paths:
   download_dir: "downloads"
   state_file: "state/seen.json"

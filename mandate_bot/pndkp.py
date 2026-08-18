@@ -22,7 +22,7 @@ import requests
 from bs4 import BeautifulSoup
 
 from .http_utils import get_with_retry
-from .logging_utils import append_match_log, slugify
+from .logging_utils import append_match_log, unique_dest_dir
 from .matcher import find_matches
 from .models import Tender
 from .pdf_utils import download_file, extract_text_any
@@ -111,8 +111,7 @@ def process_candidates(candidates: list[Tender], keywords: list[str], cfg: dict,
             hits = find_matches(text, keywords)
             if hits:
                 match_count += 1
-                folder_name = slugify(t.title)
-                dest_dir = os.path.join(cfg["paths"]["download_dir"], folder_name)
+                dest_dir = unique_dest_dir(cfg["paths"]["download_dir"], t.title)
                 os.makedirs(dest_dir, exist_ok=True)
                 dest_name = f"doc_0{_guess_extension(tmp_path)}"
                 with open(tmp_path, "rb") as src_f, open(os.path.join(dest_dir, dest_name), "wb") as dst_f:
