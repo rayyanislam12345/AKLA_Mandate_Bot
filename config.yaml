@@ -113,6 +113,11 @@ sindh:
   listing_path: "PPMS/public/portal/notice-inviting-tender"
   max_pages: 10
   request_delay_seconds: 1.0
+  # A single NIT can bundle many procurement items, each needing its own
+  # sequential download (one real tender had 86) — cap how many bidding
+  # documents get downloaded per tender so an outlier can't stall a run for
+  # 20+ minutes. The NIT Notice itself is always downloaded regardless.
+  max_bidding_docs_per_tender: 15
 
 # KP Planning & Development Department tenders page (pndkp.gov.pk/tenders/)
 # A WordPress site (WP Download Manager plugin) — the simplest source yet:

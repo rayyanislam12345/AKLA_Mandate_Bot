@@ -125,34 +125,45 @@ def fetch_all(base_url: str, listing_path: str, request_delay: float = 1.0, max_
     return tenders
 
 
-def _download_all(page, log_: logging.Logger) -> list[str]:
-    """Clicks the NIT Notice + every per-item Bidding Document download link
-    in the currently-open detail modal, saving each to a temp file. Returns
-    the list of saved temp paths."""
+def _download_all(page, log_: logging.Logger, max_bidding_docs: int = 15) -> list[str]:
+    """Clicks the NIT Notice + per-item Bidding Document download links in
+    the currently-open detail modal, saving each to a temp file. A single
+    NIT can bundle dozens of items (one real tender had 86), each requiring
+    its own sequential download — capped at max_bidding_docs so one outlier
+    tender can't stall a run for 20+ minutes; the NIT Notice itself (the
+    primary content) is never capped. Returns the list of saved temp paths."""
     saved_paths = []
     tmpdir = tempfile.mkdtemp()
-
-    link_selectors = [
-        "a[id$=':downloadNoticeFileName']",           # NIT Notice
-        "a[id*=':itemlist:'][id$=':downloadFileBiddingdoc']",  # per-item bidding docs
-    ]
     idx = 0
-    for selector in link_selectors:
-        links = page.query_selector_all(selector)
-        for link in links:
-            if not link.is_visible():
-                continue
-            try:
-                with page.expect_download(timeout=20000) as dl_info:
-                    link.click()
-                download = dl_info.value
-                dest = os.path.join(tmpdir, f"doc_{idx}.pdf")
-                download.save_as(dest)
-                saved_paths.append(dest)
-                idx += 1
-            except Exception:
-                log_.exception("Failed to download a document from Sindh detail modal")
+
+    def _download_link(link) -> bool:
+        nonlocal idx
+        try:
+            with page.expect_download(timeout=20000) as dl_info:
+                link.click()
+            download = dl_info.value
+            dest = os.path.join(tmpdir, f"doc_{idx}.pdf")
+            download.save_as(dest)
+            saved_paths.append(dest)
+            idx += 1
+            return True
+        except Exception:
+            log_.exception("Failed to download a document from Sindh detail modal")
+            return False
+        finally:
             page.wait_for_timeout(500)
+
+    for link in page.query_selector_all("a[id$=':downloadNoticeFileName']"):
+        if link.is_visible():
+            _download_link(link)
+
+    bidding_links = [l for l in page.query_selector_all("a[id*=':itemlist:'][id$=':downloadFileBiddingdoc']")
+                      if l.is_visible()]
+    if len(bidding_links) > max_bidding_docs:
+        log_.warning("Tender has %d bundled items — only downloading the first %d bidding documents",
+                     len(bidding_links), max_bidding_docs)
+    for link in bidding_links[:max_bidding_docs]:
+        _download_link(link)
 
     return saved_paths
 
@@ -161,6 +172,7 @@ def process_candidates(candidates: list[Tender], keywords: list[str], cfg: dict,
     src_cfg = cfg.get("sindh", {})
     listing_url = urljoin(src_cfg["base_url"], src_cfg["listing_path"])
     request_delay = src_cfg.get("request_delay_seconds", 1.0)
+    max_bidding_docs = src_cfg.get("max_bidding_docs_per_tender", 15)
 
     match_count = 0
     with sync_playwright() as p:
@@ -183,7 +195,7 @@ def process_candidates(candidates: list[Tender], keywords: list[str], cfg: dict,
                 view_link.click()
                 page.wait_for_timeout(1500)
 
-                saved_paths = _download_all(page, log_)
+                saved_paths = _download_all(page, log_, max_bidding_docs=max_bidding_docs)
             except Exception:
                 log_.exception("Error opening detail modal for %s", t.tender_ref)
                 page.close()
