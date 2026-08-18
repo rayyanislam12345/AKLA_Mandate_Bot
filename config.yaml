@@ -114,6 +114,20 @@ sindh:
   max_pages: 10
   request_delay_seconds: 1.0
 
+# KP Planning & Development Department tenders page (pndkp.gov.pk/tenders/)
+# A WordPress site (WP Download Manager plugin) — the simplest source yet:
+# title + a directly downloadable file URL are both right in the listing
+# page, no detail-page visit needed, no real pagination (~39 tenders,
+# entirely on one page), valid TLS cert. No department/category/closing-date
+# metadata is exposed (generic file library, not a purpose-built portal), so
+# every listed file is scanned directly via the keyword pass.
+pndkp:
+  enabled: true
+  base_url: "https://pndkp.gov.pk/"
+  listing_path: "tenders/"
+  max_pages: 5
+  request_delay_seconds: 1.0
+
 paths:
   download_dir: "downloads"
   state_file: "state/seen.json"

@@ -6,3 +6,4 @@ state/
 logs/
 .DS_Store
 dashboard.html
+.claude/

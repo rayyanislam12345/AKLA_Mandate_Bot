@@ -20,15 +20,13 @@ import time
 from datetime import datetime
 from urllib.parse import urljoin
 
-import pytesseract
 import requests
 from bs4 import BeautifulSoup
-from PIL import Image
 
 from .logging_utils import append_match_log, slugify
 from .matcher import find_matches
 from .models import Tender
-from .pdf_utils import DOWNLOAD_RETRIES, DOWNLOAD_RETRY_BACKOFF, extract_text
+from .pdf_utils import download_file, extract_text_any
 
 log = logging.getLogger("mandate_bot.kppra")
 
@@ -136,35 +134,6 @@ def fetch_all(base_url: str, listing_path: str, categories: list[str],
     return tenders
 
 
-def _extract_text_any(session: requests.Session, url: str, tmp_path: str, verify_ssl: bool) -> str:
-    last_exc = None
-    for attempt in range(DOWNLOAD_RETRIES):
-        try:
-            resp = session.get(url, verify=verify_ssl, timeout=60)
-            resp.raise_for_status()
-            break
-        except requests.RequestException as exc:
-            last_exc = exc
-            if attempt < DOWNLOAD_RETRIES - 1:
-                delay = DOWNLOAD_RETRY_BACKOFF[attempt]
-                log.warning("Download of %s failed (attempt %d/%d): %s — retrying in %ds",
-                            url, attempt + 1, DOWNLOAD_RETRIES, exc, delay)
-                time.sleep(delay)
-    else:
-        raise last_exc
-
-    with open(tmp_path, "wb") as f:
-        f.write(resp.content)
-
-    if resp.content[:4] == b"%PDF":
-        return extract_text(tmp_path)
-    try:
-        return pytesseract.image_to_string(Image.open(tmp_path))
-    except Exception as exc:
-        log.warning("Failed to OCR image %s: %s", url, exc)
-        return ""
-
-
 def process_candidates(candidates: list[Tender], keywords: list[str], cfg: dict, state, log_: logging.Logger) -> int:
     src_cfg = cfg.get("kppra", {})
     verify_ssl = not src_cfg.get("insecure_skip_verify", False)
@@ -190,10 +159,11 @@ def process_candidates(candidates: list[Tender], keywords: list[str], cfg: dict,
         try:
             with tempfile.TemporaryDirectory() as tmpdir:
                 for i, url in enumerate(urls):
-                    ext = ".pdf" if url.lower().endswith(".pdf") or "bidding" in url.lower() else ""
-                    tmp_path = os.path.join(tmpdir, f"doc_{i}{ext or '.bin'}")
+                    tmp_path = os.path.join(tmpdir, f"doc_{i}.bin")
                     try:
-                        text = _extract_text_any(session, url, tmp_path, verify_ssl)
+                        if not download_file(session, url, tmp_path, verify_ssl=verify_ssl):
+                            raise RuntimeError("download failed")
+                        text = extract_text_any(tmp_path)
                         combined_text += "\n" + text
                         tmp_files.append((url, tmp_path))
                     except Exception as exc:

@@ -1,6 +1,6 @@
 # Mandate Bot
 
-Scrapes active tenders from five government procurement portals, downloads
+Scrapes active tenders from six government procurement portals, downloads
 tender documents (plus any corrigenda/addenda/minutes) for anything tagged
 as a legal-adjacent procurement type, scans the text for legal-services
 keywords, saves matches into `downloads/`, and generates a browsable local
@@ -12,6 +12,7 @@ Sources:
 - **Khyber Pakhtunkhwa Public Procurement Regulatory Authority** (`kppra.gov.pk`)
 - **Federal PPRA e-Publish & Monitoring System** (`epms.ppra.gov.pk`)
 - **Sindh Public Procurement Regulatory Authority** (`ppms.pprasindh.gov.pk`)
+- **KP Planning & Development Department** (`pndkp.gov.pk`)
 
 ## How it works
 
@@ -69,6 +70,20 @@ several items/schemes, each with its own Bidding Document — all of them are
 downloaded and matched. Committee-approval documents and newspaper-ad scans
 are deliberately skipped (administrative noise / same false-positive risk
 as EPMS's advertisement docs, respectively).
+
+### KP Planning & Development Department (`mandate_bot/pndkp.py`)
+The simplest source of the six: a WordPress site (WP Download Manager
+plugin) where the title and a directly downloadable file URL are both right
+there in the listing page — no detail-page visit, no browser, no pagination
+(the whole tenders category is ~39 files on one page). No department,
+category, or closing-date metadata is exposed (it's a generic file library,
+not a purpose-built tender portal), so every listed file is scanned
+directly. This source is also where the mixed-filetype gap was found and
+fixed — its "documents" are a genuine mix of PDFs, scanned JPG/PNG images,
+and Word `.docx` files, not just PDFs like every other source assumed.
+`pdf_utils.extract_text_any()` (shared with KPPRA) now branches on the
+downloaded file's actual signature: PDF → existing pdfplumber+OCR pipeline,
+`.docx` → `python-docx`, anything else → OCR directly as an image.
 
 ### All sources
 The combined text is checked against the keyword list in `config.yaml`. If

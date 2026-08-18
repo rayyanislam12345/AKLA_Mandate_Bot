@@ -40,8 +40,8 @@ def parse_args():
              "tenders, even if already marked as seen (listing order = newest first).",
     )
     parser.add_argument(
-        "--source", choices=["all", "punjab", "bppt", "kppra", "epms", "sindh"], default="all",
-        help="Run only one source instead of all five.",
+        "--source", choices=["all", "punjab", "bppt", "kppra", "epms", "sindh", "pndkp"], default="all",
+        help="Run only one source instead of all six.",
     )
     return parser.parse_args()
 
@@ -263,9 +263,36 @@ def run():
         sindh_matches = sindh_module.process_candidates(new_sindh, keywords, cfg, state, log)
         match_count += sindh_matches
 
+    pndkp_cfg = cfg.get("pndkp", {})
+    pndkp_checked = 0
+    if pndkp_cfg.get("enabled") and args.source in ("all", "pndkp"):
+        from . import pndkp as pndkp_module
+
+        pndkp_tenders = pndkp_module.fetch_all(
+            base_url=pndkp_cfg["base_url"],
+            listing_path=pndkp_cfg["listing_path"],
+            request_delay=pndkp_cfg.get("request_delay_seconds", 1.0),
+            max_pages=pndkp_cfg.get("max_pages", 5),
+        )
+        log.info("PNDKP: fetched %d candidate tenders", len(pndkp_tenders))
+
+        if args.rescan_last > 0:
+            forced = pndkp_tenders[:args.rescan_last]
+            for t in forced:
+                state.unmark(t.key)
+            log.info("PNDKP: --rescan-last %d: force-unmarked %d candidates for re-scan",
+                      args.rescan_last, len(forced))
+
+        new_pndkp = [t for t in pndkp_tenders if not state.has(t.key)]
+        pndkp_checked = len(new_pndkp)
+        log.info("PNDKP: %d are new (not previously processed)", pndkp_checked)
+
+        pndkp_matches = pndkp_module.process_candidates(new_pndkp, keywords, cfg, state, log)
+        match_count += pndkp_matches
+
     state.save()
     log.info("Run complete. %d new matches found out of %d new candidates checked.",
-              match_count, len(new_candidates) + bppt_checked + kppra_checked + epms_checked + sindh_checked)
+              match_count, len(new_candidates) + bppt_checked + kppra_checked + epms_checked + sindh_checked + pndkp_checked)
 
 
 if __name__ == "__main__":
