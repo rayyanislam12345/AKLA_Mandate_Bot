@@ -72,18 +72,28 @@ TEMPLATE = """<!doctype html>
 <head>
 <meta charset="utf-8">
 <title>Mandate Bot — Matched Tenders</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Roboto+Slab:wght@400;600;700;900&family=Roboto+Condensed:wght@400;600;700&display=swap" rel="stylesheet">
 <style>
   :root {
-    --bg: #f7f7f8;
+    --navy-950: #0c1629;
+    --navy-800: #16223f;
+    --navy-700: #253c6d;
+    --gold: #efd5a6;
+    --gold-deep: #a9813f;
+    --bg: #f8f6f2;
     --panel: #ffffff;
-    --border: #e2e2e6;
-    --text: #1b1b1f;
-    --muted: #6b6b74;
-    --accent: #2f5fda;
-    --accent-bg: #eaf0ff;
-    --row-alt: #fafafb;
-    --tag-bg: #fff3cd;
-    --tag-text: #7a5c00;
+    --border: #e5e1d6;
+    --text: #101828;
+    --muted: #656d7c;
+    --accent: #253c6d;
+    --accent-bg: #eef1f8;
+    --row-alt: #faf9f6;
+    --tag-bg: #f5e6c8;
+    --tag-text: #7a5c1e;
+    --serif: "Roboto Slab", Georgia, "Times New Roman", serif;
+    --condensed: "Roboto Condensed", -apple-system, "Segoe UI", sans-serif;
   }
   * { box-sizing: border-box; }
   body {
@@ -93,35 +103,52 @@ TEMPLATE = """<!doctype html>
     color: var(--text);
   }
   header {
-    padding: 20px 28px;
-    background: var(--panel);
-    border-bottom: 1px solid var(--border);
+    padding: 28px 32px 24px;
+    background: var(--navy-950);
+    border-bottom: 3px solid var(--gold);
+  }
+  .eyebrow {
+    font-family: var(--serif);
+    font-weight: 700;
+    font-size: 11px;
+    letter-spacing: 4px;
+    text-transform: uppercase;
+    color: var(--gold);
+    margin-bottom: 6px;
   }
   h1 {
-    margin: 0 0 4px 0;
-    font-size: 20px;
-    font-weight: 650;
+    margin: 0 0 6px 0;
+    font-family: var(--serif);
+    font-size: 26px;
+    font-weight: 600;
+    color: #ffffff;
+    letter-spacing: 0.3px;
   }
   .subtitle {
-    color: var(--muted);
+    color: #aab4c8;
     font-size: 13px;
   }
   .controls {
     display: flex;
     gap: 10px;
-    padding: 14px 28px;
+    padding: 14px 32px;
     background: var(--panel);
     border-bottom: 1px solid var(--border);
     flex-wrap: wrap;
     align-items: center;
   }
   .controls input, .controls select {
-    padding: 7px 10px;
+    padding: 8px 11px;
     border: 1px solid var(--border);
     border-radius: 6px;
     font-size: 13px;
     background: var(--bg);
     color: var(--text);
+  }
+  .controls input:focus, .controls select:focus {
+    outline: none;
+    border-color: var(--gold-deep);
+    box-shadow: 0 0 0 3px rgba(239, 213, 166, 0.35);
   }
   .controls input { flex: 1; min-width: 200px; }
   .count-badge {
@@ -129,29 +156,35 @@ TEMPLATE = """<!doctype html>
     color: var(--muted);
     margin-left: auto;
   }
-  main { padding: 20px 28px 40px; }
+  main { padding: 22px 32px 40px; }
   .table-wrap {
     background: var(--panel);
     border: 1px solid var(--border);
-    border-radius: 10px;
+    border-radius: 8px;
     overflow: auto;
-    max-height: calc(100vh - 170px);
+    max-height: calc(100vh - 180px);
   }
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
   thead th {
     position: sticky;
     top: 0;
-    background: var(--panel);
+    background: var(--navy-950);
     text-align: left;
-    padding: 10px 12px;
-    border-bottom: 1px solid var(--border);
-    font-weight: 600;
+    padding: 11px 12px;
+    border-bottom: 1px solid var(--navy-950);
+    font-family: var(--condensed);
+    font-weight: 700;
+    font-size: 11px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: #dfe4ee;
     cursor: pointer;
     user-select: none;
     white-space: nowrap;
   }
-  thead th:hover { color: var(--accent); }
-  thead th.sorted::after { content: " " attr(data-dir); font-size: 10px; color: var(--accent); }
+  thead th:hover { color: var(--gold); }
+  thead th.sorted { color: var(--gold); }
+  thead th.sorted::after { content: " " attr(data-dir); font-size: 10px; }
   tbody tr:nth-child(even) { background: var(--row-alt); }
   tbody tr:hover { background: var(--accent-bg); }
   td {
@@ -180,12 +213,14 @@ TEMPLATE = """<!doctype html>
   }
   .source-badge {
     display: inline-block;
-    padding: 2px 8px;
+    padding: 2px 9px;
     border-radius: 999px;
+    font-family: var(--condensed);
     font-size: 11px;
-    font-weight: 600;
-    background: var(--accent-bg);
-    color: var(--accent);
+    font-weight: 700;
+    letter-spacing: 0.3px;
+    background: var(--navy-700);
+    color: var(--gold);
     white-space: nowrap;
   }
   .kw {
@@ -206,7 +241,7 @@ TEMPLATE = """<!doctype html>
     margin-bottom: 3px;
     white-space: nowrap;
   }
-  .docs a:hover { text-decoration: underline; }
+  .docs a:hover { color: var(--gold-deep); text-decoration: underline; }
   .empty-state {
     padding: 60px 20px;
     text-align: center;
@@ -214,24 +249,31 @@ TEMPLATE = """<!doctype html>
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg: #17181c;
-      --panel: #1e1f24;
-      --border: #2c2d33;
+      --navy-950: #070c16;
+      --navy-800: #111d34;
+      --navy-700: #2c447d;
+      --gold: #e8c88a;
+      --gold-deep: #e8c88a;
+      --bg: #0f141d;
+      --panel: #151b26;
+      --border: #262d3a;
       --text: #e7e7ea;
-      --muted: #9a9aa3;
-      --accent: #7fa1ff;
-      --accent-bg: #1f2740;
-      --row-alt: #202127;
-      --tag-bg: #3a3312;
-      --tag-text: #e8c86a;
+      --muted: #9098a8;
+      --accent: #e8c88a;
+      --accent-bg: #1c2536;
+      --row-alt: #12171f;
+      --tag-bg: #3a2f14;
+      --tag-text: #e8c88a;
     }
+    thead th { background: var(--navy-950); }
   }
 </style>
 </head>
 <body>
 <header>
+  <div class="eyebrow">Ali Khan Law Associates</div>
   <h1>Mandate Bot — Matched Tenders</h1>
-  <div class="subtitle">Legal-services tenders found across Punjab, Balochistan (BPPT), KPPRA, and federal PPRA (EPMS)</div>
+  <div class="subtitle">Legal-services opportunities matched across Punjab, Balochistan, KPPRA, federal PPRA, Sindh, KP P&amp;D, the Asian Development Bank, and the World Bank</div>
 </header>
 <div class="controls">
   <input id="search" type="text" placeholder="Search title, department, keywords...">
