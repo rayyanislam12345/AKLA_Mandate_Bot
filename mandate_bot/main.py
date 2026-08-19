@@ -3,16 +3,9 @@ from __future__ import annotations
 import argparse
 import logging
 import os
-import tempfile
-import time
-from datetime import datetime
 
 import yaml
 
-from .logging_utils import append_match_log, slugify
-from .matcher import find_matches
-from .pdf_utils import download_pdf, extract_text
-from .scraper import TenderScraper
 from .state import SeenState
 
 log = logging.getLogger("mandate_bot")
@@ -64,21 +57,22 @@ def run():
     keywords = cfg.get("keywords", [])
 
     match_count = 0
-    new_candidates = []
-    scraper = None
-    src = cfg["source"]
+
+    punjab_cfg = cfg["source"]
+    punjab_checked = 0
     if args.source in ("all", "punjab"):
         try:
-            scraper = TenderScraper(
-                base_url=src["base_url"],
-                listing_path=src["listing_path"],
-                verify_ssl=not src.get("insecure_skip_verify", False),
-                request_delay=src.get("request_delay_seconds", 1.5),
-                max_pages=src.get("max_pages", 20),
-            )
+            from . import scraper as punjab_module
+
             categories = {c.lower() for c in cfg.get("categories", [])}
 
-            tenders = scraper.fetch_all()
+            tenders = punjab_module.fetch_all(
+                base_url=punjab_cfg["base_url"],
+                listing_path=punjab_cfg["listing_path"],
+                verify_ssl=not punjab_cfg.get("insecure_skip_verify", False),
+                request_delay=punjab_cfg.get("request_delay_seconds", 1.5),
+                max_pages=punjab_cfg.get("max_pages", 20),
+            )
             log.info("Fetched %d tenders total", len(tenders))
 
             candidates = [t for t in tenders if t.category.lower() in categories]
@@ -92,67 +86,13 @@ def run():
                           args.rescan_last, len(forced))
 
             new_candidates = [t for t in candidates if not state.has(t.key)]
-            log.info("%d are new (not previously processed)", len(new_candidates))
+            punjab_checked = len(new_candidates)
+            log.info("%d are new (not previously processed)", punjab_checked)
+
+            punjab_matches = punjab_module.process_candidates(new_candidates, keywords, cfg, state, log)
+            match_count += punjab_matches
         except Exception:
             log.exception("Punjab source failed, skipping the rest of it and moving on")
-
-    for t in new_candidates:
-        urls = [u for u in (t.document_url, t.notice_url) if u]
-        if not urls:
-            state.mark(t.key)
-            continue
-
-        combined_text = ""
-        tmp_files = []
-        any_failed = False
-        try:
-            with tempfile.TemporaryDirectory() as tmpdir:
-                for i, url in enumerate(urls):
-                    tmp_path = os.path.join(tmpdir, f"doc_{i}.pdf")
-                    ok = download_pdf(scraper.session, url, tmp_path, verify_ssl=scraper.verify_ssl)
-                    if ok:
-                        tmp_files.append((url, tmp_path))
-                        combined_text += "\n" + extract_text(tmp_path)
-                    else:
-                        any_failed = True
-                    time.sleep(src.get("request_delay_seconds", 1.5))
-
-                hits = find_matches(combined_text, keywords)
-                if hits:
-                    match_count += 1
-                    folder_name = f"{t.publish_date.replace(' ', '')}_{slugify(t.title)}".replace("/", "-")
-                    dest_dir = os.path.join(cfg["paths"]["download_dir"], folder_name)
-                    os.makedirs(dest_dir, exist_ok=True)
-                    for url, tmp_path in tmp_files:
-                        dest_name = os.path.basename(url)
-                        with open(tmp_path, "rb") as src_f, open(os.path.join(dest_dir, dest_name), "wb") as dst_f:
-                            dst_f.write(src_f.read())
-
-                    log.info("MATCH: %s (%s) — keywords: %s", t.title, t.department, hits)
-                    append_match_log(cfg["paths"]["match_log"], {
-                        "found_at": datetime.now().isoformat(timespec="seconds"),
-                        "source": t.source,
-                        "title": t.title,
-                        "department": t.department,
-                        "category": t.category,
-                        "notice_type": t.notice_type,
-                        "publish_date": t.publish_date,
-                        "close_date": t.close_date,
-                        "matched_keywords": "; ".join(hits),
-                        "notice_url": t.notice_url or "",
-                        "document_url": t.document_url or "",
-                        "saved_dir": dest_dir,
-                        "tender_ref": t.tender_ref,
-                        "extra_urls": "; ".join(t.extra_urls),
-                    })
-        except Exception:
-            log.exception("Error processing tender %s", t.title)
-            continue
-
-        if any_failed:
-            log.warning("Leaving %s unmarked (seen) for retry — one or more documents failed to download", t.title)
-        else:
-            state.mark(t.key)
 
     bppt_cfg = cfg.get("bppt", {})
     bppt_checked = 0
@@ -328,7 +268,7 @@ def run():
 
     state.save()
     log.info("Run complete. %d new matches found out of %d new candidates checked.",
-              match_count, len(new_candidates) + bppt_checked + kppra_checked + epms_checked
+              match_count, punjab_checked + bppt_checked + kppra_checked + epms_checked
               + sindh_checked + pndkp_checked + adb_checked)
 
 

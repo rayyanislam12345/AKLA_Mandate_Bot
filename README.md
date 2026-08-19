@@ -19,14 +19,30 @@ Sources:
 ## How it works
 
 ### Punjab (`mandate_bot/scraper.py`)
-1. Loads `ActiveTenders.aspx` and walks every page of the results grid (it's
-   an ASP.NET WebForms `RadGrid`, so paging is done by replaying its
-   `__doPostBack` viewstate mechanism — see `aspnet_form.py`).
+An ASP.NET WebForms `RadGrid`, paged via the standard `__doPostBack`
+client-side function. Originally scraped with plain `requests`, but the
+portal started blocking non-browser HTTP clients at the connection level
+(2026-08-19: curl and `requests` both fail with `SSL: WRONG_VERSION_NUMBER`
+even with a valid, non-expired cert, while a real Playwright browser
+connects fine) — so this source now uses Playwright like most of the
+others. Two quirks specific to this site, both worth knowing if it breaks
+again: calling `__doPostBack` via `page.evaluate()` fails outright (its
+~15-year-old Microsoft AJAX implementation touches `arguments.callee`,
+which modern V8 rejects in that context — clicking the pager link directly
+works fine), and the data rows are present in the raw server response but
+get wiped from the live DOM by client-side JS shortly after load when
+driven by Playwright — so parsing works off the raw response body
+(`response.text()`) captured at navigation/pagination time, never
+`page.content()`.
+
+1. Walks every page of the results grid.
 2. Rows are filtered down to the categories listed in `config.yaml`
    (`Services`, `Consultancy` by default — the portal has no dedicated
    "Legal" category, so this is a coarse pre-filter).
 3. For each new tender, both linked PDFs ("Tender Notice" and "Bidding
-   Document") are downloaded and their text is extracted with `pdfplumber`,
+   Document") are downloaded (via Playwright's download capture — direct
+   PDF links make `page.goto()` raise "Download is starting", which is
+   expected, not a failure) and their text is extracted with `pdfplumber`,
    falling back to OCR (Tesseract) page-by-page for any page with no
    embedded text layer (i.e. scanned/image-only pages) — see `pdf_utils.py`.
 
@@ -154,7 +170,7 @@ cd "Mandate Bot"
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-python3 -m playwright install chromium   # one-time browser download (~300MB), needed for BPPT/Sindh/ADB
+python3 -m playwright install chromium   # one-time browser download (~300MB), needed for Punjab/BPPT/Sindh/ADB
 ```
 
 Also needs, via Homebrew (for OCR on Punjab/KPPRA/PNDKP):
