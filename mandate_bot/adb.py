@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import tempfile
 import time
 from datetime import datetime
@@ -76,6 +77,20 @@ def _parse_rows(page) -> list[dict]:
     return rows
 
 
+_REF_RE = re.compile(r"\(([\w./-]+)\)\s*$")
+
+
+def _extract_ref(title: str) -> str | None:
+    """Most titles end with a stable package reference in parens, e.g.
+    "...(56146-001)" — a handful don't (a different title format ADB uses
+    for some postings). When present, this is a much more reliable
+    identifier than the full title text, which can drift slightly between
+    two searches minutes apart against ADB's live, frequently-updated data
+    (new postings shift result ordering, titles get corrected, etc.)."""
+    m = _REF_RE.search(title)
+    return m.group(1) if m else None
+
+
 def _make_tender(row: dict) -> Tender:
     return Tender(
         notice_type="Consulting Opportunity",
@@ -88,7 +103,15 @@ def _make_tender(row: dict) -> Tender:
         notice_url=None,
         document_url=None,
         source="adb",
+        tender_ref=_extract_ref(row["title"]) or "",
     )
+
+
+def _same_opportunity(a: str, b: str) -> bool:
+    ref_a, ref_b = _extract_ref(a), _extract_ref(b)
+    if ref_a and ref_b:
+        return ref_a == ref_b
+    return a == b
 
 
 def run(search_terms: list[str], cfg: dict, state, log_: logging.Logger) -> tuple[int, int]:
@@ -134,7 +157,7 @@ def run(search_terms: list[str], cfg: dict, state, log_: logging.Logger) -> tupl
                     # View-CSRN icon indices) are in a known, valid state
                     _search(page, term, log_)
                     fresh_rows = _parse_rows(page)
-                    row_index = next((i for i, r in enumerate(fresh_rows) if r["title"] == row["title"]), None)
+                    row_index = next((i for i, r in enumerate(fresh_rows) if _same_opportunity(r["title"], row["title"])), None)
                     if row_index is None:
                         log_.warning("Could not re-locate %r after re-search, skipping", row["title"][:80])
                         continue

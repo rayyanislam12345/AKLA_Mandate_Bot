@@ -3,10 +3,11 @@
 source:
   base_url: "https://eproc.punjab.gov.pk/"
   listing_path: "ActiveTenders.aspx"
-  # This portal's TLS cert is expired (server-side issue, confirmed 2026-08-15).
-  # Set to true to allow the bot to run at all; the risk is limited since this
-  # is a read-only public tender listing, not a login/credentials flow.
-  insecure_skip_verify: true
+  # This portal's TLS cert was expired when the bot was first built
+  # (2026-08-15) but has since been properly reissued (verified 2026-08-18,
+  # valid DigiCert cert through Mar 2027) — verification is back on. If it
+  # ever regresses, flip this to true as a temporary workaround.
+  insecure_skip_verify: false
   max_pages: 20        # safety cap on grid pages to walk
   request_delay_seconds: 1.5   # be polite to the server
 
