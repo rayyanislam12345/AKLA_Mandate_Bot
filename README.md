@@ -1,7 +1,7 @@
 # Mandate Bot
 
-Scrapes active tenders/opportunities from seven procurement sources
-(domestic Pakistani portals plus one international one), downloads
+Scrapes active tenders/opportunities from eight procurement sources
+(domestic Pakistani portals plus two international ones), downloads
 documents (plus any corrigenda/addenda/minutes) for anything tagged as a
 legal-adjacent procurement type, scans the text for legal-services
 keywords, saves matches into `downloads/`, and generates a browsable local
@@ -15,6 +15,7 @@ Sources:
 - **Sindh Public Procurement Regulatory Authority** (`ppms.pprasindh.gov.pk`)
 - **KP Planning & Development Department** (`pndkp.gov.pk`)
 - **Asian Development Bank Consultant Management System** (`selfservice.adb.org`) — international-tier
+- **World Bank Procurement Notices** (`projects.worldbank.org`, Pakistan-filtered) — international-tier
 
 ## How it works
 
@@ -90,7 +91,7 @@ are deliberately skipped (administrative noise / same false-positive risk
 as EPMS's advertisement docs, respectively).
 
 ### KP Planning & Development Department (`mandate_bot/pndkp.py`)
-The simplest source of the seven: a WordPress site (WP Download Manager
+The simplest of the domestic portals: a WordPress site (WP Download Manager
 plugin) where the title and a directly downloadable file URL are both right
 there in the listing page — no detail-page visit, no browser, no pagination
 (the whole tenders category is ~39 files on one page). No department,
@@ -132,6 +133,36 @@ this source runs fetch and document-capture as one pass per search term
 re-runs stay cheap) rather than the two-phase split every other source
 uses.
 
+### World Bank (`mandate_bot/worldbank.py`)
+The lightest source by far, and different from every other one in a key
+way: it's driven entirely by the World Bank's own JSON API
+(`search.worldbank.org/api/v2/procnotices`) rather than the Angular page
+a browser would show you. The site's own "Country" filter URL param
+(`countrycode_exact=PK`) turned out not to filter anything server-side —
+confirmed with curl, with the live browser's own network request, and
+with a screenshot of the site itself returning unfiltered global results
+despite the param. The field that actually works, found by inspecting the
+API's facet list, is `project_ctry_name_exact=Pakistan`.
+
+More importantly, the API's listing response already includes each
+notice's full content as an HTML fragment (`notice_text`) — the exact
+same text that renders on the detail page. That means fetching and
+keyword-matching both happen off a single API call, with **no
+per-candidate browser rendering at all** — a first for this project, every
+other JS-heavy source needs Playwright just to read a listing or a
+document. A headless browser is only launched for confirmed matches, to
+turn `notice_text` into a PDF snapshot for the downloads folder
+(`page.set_content()` + `page.pdf()` — no network navigation involved,
+since the content's already in hand).
+
+"Contract Award" notices (announcing an already-decided winner, not an
+open opportunity) are excluded; the remaining four notice types —
+Invitation for Bids, Request for Expression of Interest, General
+Procurement Notice, Invitation for Prequalification — are all fetched and
+scanned against the same keyword list as every other source. No separate
+document/attachment field exists in the API schema for any notice type
+checked; `notice_text` is the only document there is.
+
 ### All sources
 The combined text is checked against the keyword list in `config.yaml`. If
 any keyword hits, every document found for that tender (primary + any
@@ -170,7 +201,7 @@ cd "Mandate Bot"
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-python3 -m playwright install chromium   # one-time browser download (~300MB), needed for Punjab/BPPT/Sindh/ADB
+python3 -m playwright install chromium   # one-time browser download (~300MB), needed for Punjab/BPPT/Sindh/ADB/World Bank (matches only)
 ```
 
 Also needs, via Homebrew (for OCR on Punjab/KPPRA/PNDKP):
@@ -190,7 +221,7 @@ that file if you need to create it).
 # or: source .venv/bin/activate && python3 -m mandate_bot.main
 ```
 
-A full run (all seven sources) currently takes on the order of tens of
+A full run (all eight sources) currently takes on the order of tens of
 minutes to a few hours depending on network conditions, since every
 candidate document is downloaded/rendered and read individually with a
 polite delay between requests — this is normal, let it finish. Each source

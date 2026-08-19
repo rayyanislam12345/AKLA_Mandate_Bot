@@ -33,8 +33,8 @@ def parse_args():
              "tenders, even if already marked as seen (listing order = newest first).",
     )
     parser.add_argument(
-        "--source", choices=["all", "punjab", "bppt", "kppra", "epms", "sindh", "pndkp", "adb"], default="all",
-        help="Run only one source instead of all seven.",
+        "--source", choices=["all", "punjab", "bppt", "kppra", "epms", "sindh", "pndkp", "adb", "worldbank"], default="all",
+        help="Run only one source instead of all eight.",
     )
     return parser.parse_args()
 
@@ -266,10 +266,38 @@ def run():
         except Exception:
             log.exception("ADB source failed, skipping the rest of it and moving on")
 
+    worldbank_cfg = cfg.get("worldbank", {})
+    worldbank_checked = 0
+    if worldbank_cfg.get("enabled") and args.source in ("all", "worldbank"):
+        try:
+            from . import worldbank as worldbank_module
+
+            worldbank_tenders = worldbank_module.fetch_all(
+                request_delay=worldbank_cfg.get("request_delay_seconds", 0.5),
+                page_size=worldbank_cfg.get("page_size", 100),
+            )
+            log.info("World Bank: fetched %d candidate tenders", len(worldbank_tenders))
+
+            if args.rescan_last > 0:
+                forced = worldbank_tenders[:args.rescan_last]
+                for t in forced:
+                    state.unmark(t.key)
+                log.info("World Bank: --rescan-last %d: force-unmarked %d candidates for re-scan",
+                          args.rescan_last, len(forced))
+
+            new_worldbank = [t for t in worldbank_tenders if not state.has(t.key)]
+            worldbank_checked = len(new_worldbank)
+            log.info("World Bank: %d are new (not previously processed)", worldbank_checked)
+
+            worldbank_matches = worldbank_module.process_candidates(new_worldbank, keywords, cfg, state, log)
+            match_count += worldbank_matches
+        except Exception:
+            log.exception("World Bank source failed, skipping the rest of it and moving on")
+
     state.save()
     log.info("Run complete. %d new matches found out of %d new candidates checked.",
               match_count, punjab_checked + bppt_checked + kppra_checked + epms_checked
-              + sindh_checked + pndkp_checked + adb_checked)
+              + sindh_checked + pndkp_checked + adb_checked + worldbank_checked)
 
 
 if __name__ == "__main__":

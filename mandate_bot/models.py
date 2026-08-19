@@ -15,6 +15,7 @@ class Tender:
     source: str = "punjab"            # which portal this tender came from
     extra_urls: list[str] = field(default_factory=list)  # corrigenda, addenda, minutes, etc.
     tender_ref: str = ""              # portal's own reference/ID number, when available
+    raw_content: str = ""             # full notice text/HTML, when the listing API already includes it (e.g. worldbank)
 
     @property
     def key(self) -> str:

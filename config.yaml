@@ -153,6 +153,21 @@ adb:
     - "legal"
     - "law"
 
+# World Bank Procurement Notices (projects.worldbank.org), filtered to
+# Pakistan. Backed directly by the site's own JSON API
+# (search.worldbank.org/api/v2/procnotices) rather than the Angular
+# front-end — its listing response already includes each notice's full
+# content as HTML (field `notice_text`), so keyword-matching happens
+# straight off the API with no per-candidate page rendering needed.
+# "Contract Award" notices (announcing an already-decided winner, not an
+# open opportunity) are excluded in worldbank.py. A headless browser is
+# only spun up for confirmed matches, to snapshot notice_text as a PDF —
+# no network navigation involved at that point, just local HTML-to-PDF.
+worldbank:
+  enabled: true
+  request_delay_seconds: 0.5
+  page_size: 100
+
 paths:
   download_dir: "downloads"
   state_file: "state/seen.json"
