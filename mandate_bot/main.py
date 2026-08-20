@@ -33,8 +33,8 @@ def parse_args():
              "tenders, even if already marked as seen (listing order = newest first).",
     )
     parser.add_argument(
-        "--source", choices=["all", "punjab", "bppt", "kppra", "epms", "sindh", "pndkp", "adb", "worldbank"], default="all",
-        help="Run only one source instead of all eight.",
+        "--source", choices=["all", "punjab", "bppt", "kppra", "epms", "sindh", "pndkp", "adb", "worldbank", "wbgeprocure"], default="all",
+        help="Run only one source instead of all nine.",
     )
     return parser.parse_args()
 
@@ -294,10 +294,35 @@ def run():
         except Exception:
             log.exception("World Bank source failed, skipping the rest of it and moving on")
 
+    wbgeprocure_cfg = cfg.get("wbgeprocure", {})
+    wbgeprocure_checked = 0
+    if wbgeprocure_cfg.get("enabled") and args.source in ("all", "wbgeprocure"):
+        try:
+            from . import wbgeprocure as wbgeprocure_module
+
+            wbgeprocure_tenders = wbgeprocure_module.fetch_all()
+            log.info("WBGeProcure: fetched %d candidate tenders", len(wbgeprocure_tenders))
+
+            if args.rescan_last > 0:
+                forced = wbgeprocure_tenders[:args.rescan_last]
+                for t in forced:
+                    state.unmark(t.key)
+                log.info("WBGeProcure: --rescan-last %d: force-unmarked %d candidates for re-scan",
+                          args.rescan_last, len(forced))
+
+            new_wbgeprocure = [t for t in wbgeprocure_tenders if not state.has(t.key)]
+            wbgeprocure_checked = len(new_wbgeprocure)
+            log.info("WBGeProcure: %d are new (not previously processed)", wbgeprocure_checked)
+
+            wbgeprocure_matches = wbgeprocure_module.process_candidates(new_wbgeprocure, keywords, cfg, state, log)
+            match_count += wbgeprocure_matches
+        except Exception:
+            log.exception("WBGeProcure source failed, skipping the rest of it and moving on")
+
     state.save()
     log.info("Run complete. %d new matches found out of %d new candidates checked.",
               match_count, punjab_checked + bppt_checked + kppra_checked + epms_checked
-              + sindh_checked + pndkp_checked + adb_checked + worldbank_checked)
+              + sindh_checked + pndkp_checked + adb_checked + worldbank_checked + wbgeprocure_checked)
 
 
 if __name__ == "__main__":

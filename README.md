@@ -1,7 +1,7 @@
 # Mandate Bot
 
-Scrapes active tenders/opportunities from eight procurement sources
-(domestic Pakistani portals plus two international ones), downloads
+Scrapes active tenders/opportunities from nine procurement sources
+(domestic Pakistani portals plus three international ones), downloads
 documents (plus any corrigenda/addenda/minutes) for anything tagged as a
 legal-adjacent procurement type, scans the text for legal-services
 keywords, saves matches into `downloads/`, and generates a browsable local
@@ -16,6 +16,7 @@ Sources:
 - **KP Planning & Development Department** (`pndkp.gov.pk`)
 - **Asian Development Bank Consultant Management System** (`selfservice.adb.org`) — international-tier
 - **World Bank Procurement Notices** (`projects.worldbank.org`, Pakistan-filtered) — international-tier
+- **WBGeProcure / RFx Now** (`wbgeprocure-rfxnow.worldbank.org`) — international-tier, global (no country filter)
 
 ## How it works
 
@@ -163,6 +164,36 @@ scanned against the same keyword list as every other source. No separate
 document/attachment field exists in the API schema for any notice type
 checked; `notice_text` is the only document there is.
 
+Both this source and WBGeProcure below scan each posting's **title**
+alongside its body text, unlike every other source (which only scans a
+real downloaded document, whose body almost always restates the title
+anyway). These two sources' "documents" are API-provided description
+text, which paraphrases rather than repeats the title — found via a real
+missed match where the title said "Legal Consultant" but the body said
+"Legal and Regulatory Consultant", which a plain substring match on the
+body text alone would miss.
+
+### WBGeProcure / RFx Now (`mandate_bot/wbgeprocure.py`)
+The World Bank Group's own corporate procurement platform — WBG buying
+goods/services for itself, a different thing from the `worldbank` source
+above (which covers procurement the Bank finances on behalf of borrower
+countries). It's global with no country field to filter on, so every
+active advertisement is fetched and scanned, not just Pakistan-relevant
+ones.
+
+Also Angular-fronted, also has one clean, unauthenticated, unpaginated
+JSON endpoint behind it (`json/advertisement/activeAdvertisements.json`)
+returning every active posting — 25 of them as of the day this was built
+— each with its full description inline (`text`), so listing and
+matching again happen off a single API call with no Playwright involved.
+About half of postings also carry a real downloadable attachment (a "TOR"
+PDF or `.docx`, usually), found via a second small per-posting JSON call
+(`.../advertisementAttachmentsForPublic.json`) and downloaded straight
+from a plain, unauthenticated URL — confirmed via curl before writing any
+code. For the postings with no real attachment, the fallback is the same
+`page.set_content()` + `page.pdf()` snapshot the `worldbank` source uses,
+launched only for confirmed matches.
+
 ### All sources
 The combined text is checked against the keyword list in `config.yaml`. If
 any keyword hits, every document found for that tender (primary + any
@@ -221,7 +252,7 @@ that file if you need to create it).
 # or: source .venv/bin/activate && python3 -m mandate_bot.main
 ```
 
-A full run (all eight sources) currently takes on the order of tens of
+A full run (all nine sources) currently takes on the order of tens of
 minutes to a few hours depending on network conditions, since every
 candidate document is downloaded/rendered and read individually with a
 polite delay between requests — this is normal, let it finish. Each source

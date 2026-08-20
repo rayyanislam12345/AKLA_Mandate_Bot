@@ -168,6 +168,19 @@ worldbank:
   request_delay_seconds: 0.5
   page_size: 100
 
+# WBGeProcure / RFx Now (wbgeprocure-rfxnow.worldbank.org) — the World Bank
+# Group's own corporate procurement platform (WBG buying goods/services for
+# itself), distinct from the `worldbank` source above (which covers
+# borrower-country-financed procurement). Open globally, no country filter
+# exists or is needed. The whole active-advertisements list comes from one
+# unauthenticated JSON endpoint with each posting's full description
+# inline, same as `worldbank`; about half of postings also have a real
+# downloadable attachment (ToR PDF/docx), fetched via a second small JSON
+# call per confirmed match.
+wbgeprocure:
+  enabled: true
+  request_delay_seconds: 0.5
+
 paths:
   download_dir: "downloads"
   state_file: "state/seen.json"

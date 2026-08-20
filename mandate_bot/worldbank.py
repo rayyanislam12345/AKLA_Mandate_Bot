@@ -127,7 +127,15 @@ def process_candidates(candidates: list[Tender], keywords: list[str], cfg: dict,
 
     try:
         for t in candidates:
-            hits = find_matches(_html_to_text(t.raw_content), keywords)
+            # The title is scanned alongside the body: unlike every other
+            # source (which downloads a real document whose body almost
+            # always restates the tender title), this API-sourced
+            # notice_text is a paraphrased description that doesn't
+            # reliably repeat the title verbatim (e.g. a title literally
+            # saying "Legal Consultant" can have a body that instead says
+            # "Legal and Regulatory Consultant", which the substring
+            # match on "legal consultant" would otherwise miss).
+            hits = find_matches(t.title + "\n" + _html_to_text(t.raw_content), keywords)
             if not hits:
                 state.mark(t.key)
                 continue
