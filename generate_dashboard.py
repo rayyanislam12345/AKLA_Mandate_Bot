@@ -67,7 +67,7 @@ def build_records() -> list[dict]:
     return records
 
 
-TEMPLATE = """<!doctype html>
+TEMPLATE = r"""<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -151,10 +151,30 @@ TEMPLATE = """<!doctype html>
     box-shadow: 0 0 0 3px rgba(239, 213, 166, 0.35);
   }
   .controls input { flex: 1; min-width: 200px; }
+  .controls label.checkbox {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    color: var(--text);
+    white-space: nowrap;
+    cursor: pointer;
+  }
+  .controls label.checkbox input { accent-color: var(--gold-deep); cursor: pointer; }
   .count-badge {
     font-size: 12px;
     color: var(--muted);
     margin-left: auto;
+  }
+  tr.expired { opacity: 0.55; }
+  .closed-tag {
+    display: inline-block;
+    margin-left: 6px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+    text-transform: uppercase;
+    color: #a33b3b;
   }
   main { padding: 22px 32px 40px; }
   .table-wrap {
@@ -266,6 +286,7 @@ TEMPLATE = """<!doctype html>
       --tag-text: #e8c88a;
     }
     thead th { background: var(--navy-950); }
+    .closed-tag { color: #e08080; }
   }
 </style>
 </head>
@@ -280,6 +301,10 @@ TEMPLATE = """<!doctype html>
   <select id="sourceFilter">
     <option value="">All sources</option>
   </select>
+  <label class="checkbox">
+    <input type="checkbox" id="hideExpired" checked>
+    Hide closed tenders
+  </label>
   <span class="count-badge" id="countBadge"></span>
 </div>
 <main>
@@ -308,6 +333,7 @@ const DATA = __DATA__;
 const tbody = document.getElementById('tbody');
 const searchInput = document.getElementById('search');
 const sourceFilter = document.getElementById('sourceFilter');
+const hideExpiredCheckbox = document.getElementById('hideExpired');
 const countBadge = document.getElementById('countBadge');
 
 const sources = [...new Set(DATA.map(r => r.source))].sort();
@@ -330,15 +356,53 @@ function fileLabel(path) {
   return name.length > 28 ? name.slice(0, 25) + '...' : name;
 }
 
+// Closing dates come in whatever format each portal shows: DD/MM/YYYY
+// (BPPT), "Mon DD, YYYY HH:MM AM/PM" (EPMS), DD-Mon-YYYY (KPPRA), ISO
+// YYYY-MM-DD (World Bank), or empty (ADB/Sindh have no closing date at
+// all). JS's native Date parser handles all but the DD/MM/YYYY case
+// correctly on its own — it assumes MM/DD/YYYY for slash-separated
+// dates, which misreads e.g. "24/07/2026" — so that one's special-cased.
+// Anything unparseable returns null and is treated as "unknown", never
+// as expired, since we can't be sure.
+function parseCloseDate(str) {
+  if (!str) return null;
+  str = str.trim();
+  if (!str) return null;
+
+  const slash = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (slash) {
+    const [, d, m, y] = slash;
+    const dt = new Date(+y, +m - 1, +d);
+    return isNaN(dt) ? null : dt;
+  }
+
+  const dt = new Date(str);
+  return isNaN(dt) ? null : dt;
+}
+
 function render() {
   const q = searchInput.value.trim().toLowerCase();
   const src = sourceFilter.value;
+  const hideExpired = hideExpiredCheckbox.checked;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
 
-  let rows = DATA.filter(r => {
+  let matched = DATA.filter(r => {
     if (src && r.source !== src) return false;
     if (!q) return true;
     const hay = [r.title, r.department, r.tender_ref, ...(r.matched_keywords || [])].join(' ').toLowerCase();
     return hay.includes(q);
+  });
+
+  let hiddenExpiredCount = 0;
+  let rows = matched.filter(r => {
+    const closeDt = parseCloseDate(r.close_date);
+    const expired = closeDt !== null && closeDt < today;
+    if (hideExpired && expired) {
+      hiddenExpiredCount++;
+      return false;
+    }
+    return true;
   });
 
   rows.sort((a, b) => {
@@ -348,15 +412,20 @@ function render() {
     return av < bv ? -sortDir : av > bv ? sortDir : 0;
   });
 
-  countBadge.textContent = `${rows.length} of ${DATA.length} matched tenders`;
+  countBadge.textContent = hiddenExpiredCount > 0
+    ? `${rows.length} of ${DATA.length} matched tenders (${hiddenExpiredCount} closed hidden)`
+    : `${rows.length} of ${DATA.length} matched tenders`;
 
   if (rows.length === 0) {
     tbody.innerHTML = `<tr><td colspan="9"><div class="empty-state">No matches found.</div></td></tr>`;
     return;
   }
 
-  tbody.innerHTML = rows.map(r => `
-    <tr>
+  tbody.innerHTML = rows.map(r => {
+    const closeDt = parseCloseDate(r.close_date);
+    const expired = closeDt !== null && closeDt < today;
+    return `
+    <tr class="${expired ? 'expired' : ''}">
       <td><span class="source-badge">${escapeHtml(r.source)}</span></td>
       <td>${escapeHtml(r.tender_ref)}</td>
       <td class="title-cell">
@@ -365,12 +434,13 @@ function render() {
       </td>
       <td>${escapeHtml(r.category)}</td>
       <td>${escapeHtml(r.publish_date)}</td>
-      <td>${escapeHtml(r.close_date)}</td>
+      <td>${escapeHtml(r.close_date)}${expired ? '<span class="closed-tag">Closed</span>' : ''}</td>
       <td>${(r.matched_keywords || []).map(k => `<span class="kw">${escapeHtml(k)}</span>`).join('')}</td>
       <td>${escapeHtml(r.found_at)}</td>
       <td class="docs">${r.files.map(f => `<a href="${encodeURI(f)}" target="_blank">${escapeHtml(fileLabel(f))}</a>`).join('')}</td>
     </tr>
-  `).join('');
+  `;
+  }).join('');
 }
 
 document.querySelectorAll('thead th[data-key]').forEach(th => {
@@ -391,6 +461,7 @@ document.querySelectorAll('thead th[data-key]').forEach(th => {
 
 searchInput.addEventListener('input', render);
 sourceFilter.addEventListener('change', render);
+hideExpiredCheckbox.addEventListener('change', render);
 render();
 </script>
 </body>
