@@ -12,6 +12,16 @@ log = logging.getLogger("mandate_bot")
 
 CONFIG_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config.yaml")
 
+ALL_SOURCES = ["punjab", "bppt", "kppra", "epms", "sindh", "pndkp", "adb", "worldbank", "wbgeprocure"]
+
+
+def _parse_source_list(value: str, arg_name: str) -> set[str]:
+    names = {s.strip() for s in value.split(",") if s.strip()}
+    unknown = names - set(ALL_SOURCES) - {"all"}
+    if unknown:
+        raise SystemExit(f"{arg_name}: unknown source(s) {sorted(unknown)} — choices are: all, {', '.join(ALL_SOURCES)}")
+    return set(ALL_SOURCES) if "all" in names else names
+
 
 def load_config(path: str = CONFIG_PATH) -> dict:
     with open(path, "r", encoding="utf-8") as f:
@@ -33,8 +43,15 @@ def parse_args():
              "tenders, even if already marked as seen (listing order = newest first).",
     )
     parser.add_argument(
-        "--source", choices=["all", "punjab", "bppt", "kppra", "epms", "sindh", "pndkp", "adb", "worldbank", "wbgeprocure"], default="all",
-        help="Run only one source instead of all nine.",
+        "--source", default="all",
+        help="Comma-separated list of sources to run instead of all nine "
+             f"(choices: all, {', '.join(ALL_SOURCES)}). E.g. --source punjab,bppt",
+    )
+    parser.add_argument(
+        "--exclude", default="",
+        help="Comma-separated list of sources to skip (applied after --source). "
+             "E.g. --source all --exclude punjab,bppt — useful for a CI environment "
+             "that can't reach a particular source's network.",
     )
     return parser.parse_args()
 
@@ -56,11 +73,16 @@ def run():
     state = SeenState(cfg["paths"]["state_file"])
     keywords = cfg.get("keywords", [])
 
+    requested = _parse_source_list(args.source, "--source")
+    excluded = _parse_source_list(args.exclude, "--exclude") if args.exclude else set()
+    active = requested - excluded
+    log.info("Active sources this run: %s", sorted(active))
+
     match_count = 0
 
     punjab_cfg = cfg["source"]
     punjab_checked = 0
-    if args.source in ("all", "punjab"):
+    if "punjab" in active:
         try:
             from . import scraper as punjab_module
 
@@ -96,7 +118,7 @@ def run():
 
     bppt_cfg = cfg.get("bppt", {})
     bppt_checked = 0
-    if bppt_cfg.get("enabled") and args.source in ("all", "bppt"):
+    if bppt_cfg.get("enabled") and "bppt" in active:
         try:
             from . import bppt as bppt_module
 
@@ -127,7 +149,7 @@ def run():
 
     kppra_cfg = cfg.get("kppra", {})
     kppra_checked = 0
-    if kppra_cfg.get("enabled") and args.source in ("all", "kppra"):
+    if kppra_cfg.get("enabled") and "kppra" in active:
         try:
             from . import kppra as kppra_module
 
@@ -159,7 +181,7 @@ def run():
 
     epms_cfg = cfg.get("epms", {})
     epms_checked = 0
-    if epms_cfg.get("enabled") and args.source in ("all", "epms"):
+    if epms_cfg.get("enabled") and "epms" in active:
         try:
             from . import epms as epms_module
 
@@ -191,7 +213,7 @@ def run():
 
     sindh_cfg = cfg.get("sindh", {})
     sindh_checked = 0
-    if sindh_cfg.get("enabled") and args.source in ("all", "sindh"):
+    if sindh_cfg.get("enabled") and "sindh" in active:
         try:
             from . import sindh as sindh_module
 
@@ -221,7 +243,7 @@ def run():
 
     pndkp_cfg = cfg.get("pndkp", {})
     pndkp_checked = 0
-    if pndkp_cfg.get("enabled") and args.source in ("all", "pndkp"):
+    if pndkp_cfg.get("enabled") and "pndkp" in active:
         try:
             from . import pndkp as pndkp_module
 
@@ -251,7 +273,7 @@ def run():
 
     adb_cfg = cfg.get("adb", {})
     adb_checked = 0
-    if adb_cfg.get("enabled") and args.source in ("all", "adb"):
+    if adb_cfg.get("enabled") and "adb" in active:
         try:
             from . import adb as adb_module
 
@@ -268,7 +290,7 @@ def run():
 
     worldbank_cfg = cfg.get("worldbank", {})
     worldbank_checked = 0
-    if worldbank_cfg.get("enabled") and args.source in ("all", "worldbank"):
+    if worldbank_cfg.get("enabled") and "worldbank" in active:
         try:
             from . import worldbank as worldbank_module
 
@@ -296,7 +318,7 @@ def run():
 
     wbgeprocure_cfg = cfg.get("wbgeprocure", {})
     wbgeprocure_checked = 0
-    if wbgeprocure_cfg.get("enabled") and args.source in ("all", "wbgeprocure"):
+    if wbgeprocure_cfg.get("enabled") and "wbgeprocure" in active:
         try:
             from . import wbgeprocure as wbgeprocure_module
 

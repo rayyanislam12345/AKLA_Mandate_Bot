@@ -32,7 +32,14 @@ jobs:
           playwright install --with-deps chromium
 
       - name: Run mandate bot
-        run: python3 -m mandate_bot.main
+        # Punjab and BPPT time out completely from GitHub-hosted runners'
+        # IP ranges (net::ERR_CONNECTION_TIMED_OUT — the TCP connection
+        # itself never completes, confirmed 2026-08-24 even after
+        # generously raising the navigation timeout), while working fine
+        # from a normal/local network. Both run separately via a scheduled
+        # local launchd job instead (see run_local_only.sh) and share this
+        # same state/seen.json through git, so nothing is scanned twice.
+        run: python3 -m mandate_bot.main --exclude punjab,bppt
 
       - name: Sync results to Supabase
         env:

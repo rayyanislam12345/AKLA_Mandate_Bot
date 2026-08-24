@@ -7,13 +7,17 @@
 
     <key>ProgramArguments</key>
     <array>
-        <string>/Users/rayyanui/Mandate Bot/run.sh</string>
+        <string>/Users/rayyanui/Mandate Bot/run_local_only.sh</string>
     </array>
 
+    <!-- Punjab + BPPT only — the other 7 sources run on GitHub Actions
+         (see .github/workflows/daily-run.yml, 23:00 UTC = 04:00 PKT).
+         06:00 PKT gives a 2-hour buffer so this run's `git pull` reliably
+         picks up that run's state.json commit first. -->
     <key>StartCalendarInterval</key>
     <dict>
         <key>Hour</key>
-        <integer>8</integer>
+        <integer>6</integer>
         <key>Minute</key>
         <integer>0</integer>
     </dict>
