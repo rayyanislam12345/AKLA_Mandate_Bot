@@ -245,42 +245,28 @@ If any source ever needs login credentials (currently none do — see
 root (gitignored, never committed — see the template comment at the top of
 that file if you need to create it).
 
-## Deployment: GitHub Actions + local (split by network reachability)
+## Deployment: local only, for now
 
-The bot runs on a schedule from two places, not one, because two of the
-nine sources are unreachable from GitHub's cloud IP ranges:
+The whole bot runs locally via `launchd` (`run_local_only.sh`, all nine
+sources — see Scheduling below), daily at 04:00 PKT. `sync_to_supabase.py`
+runs at the end of that same script (using the `[supabase]` block in
+`secrets.yaml`), and `state/seen.json` gets committed back to the repo
+(`[skip ci]`) after every run.
 
-- **7 sources run on GitHub Actions** (`.github/workflows/daily-run.yml`,
-  cron `0 23 * * *` UTC = 04:00 PKT): `python3 -m mandate_bot.main
-  --exclude punjab,bppt`. After the run it syncs results to Supabase
-  (`sync_to_supabase.py`, using the `SUPABASE_URL` /
-  `SUPABASE_SERVICE_ROLE_KEY` repo secrets) and commits `state/seen.json`
-  back to the repo (`[skip ci]`, so the push doesn't re-trigger the
-  workflow).
-- **Punjab + BPPT run locally** via `launchd` (`run_local_only.sh`, see
-  Scheduling below) — both time out completely from GitHub-hosted
-  runners (`net::ERR_CONNECTION_TIMED_OUT`, confirmed 2026-08-24 even
-  after generously raising the navigation timeout — the TCP connection
-  itself never completes, not just a slow page load), while working fine
-  from a normal network. This looks like the kind of blanket
-  cloud-provider-IP blocking Pakistani government/quasi-government sites
-  commonly apply as an anti-scraping measure, though that's inferred from
-  the symptom, not confirmed by the sites themselves.
-
-Both processes read and write the same `state/seen.json` and push it back
-to the repo after every run, so a tender is never scanned twice regardless
-of which one found it — GitHub Actions only ever adds keys for its 7
-sources, the local job only ever adds keys for Punjab/BPPT, so the two
-never touch the same keys. `run_local_only.sh` does `git pull` before
-running specifically so its in-memory state includes whatever GitHub
-Actions has committed since the last local run — skipping that would
-cause its final save to silently drop those keys when it rewrites the
-whole file.
-
-If GitHub-hosted runners' access to Punjab/BPPT ever changes (or you want
-everything in the cloud), removing the `--exclude punjab,bppt` from the
-workflow and stopping the local launchd job is all that's needed to fully
-consolidate back onto GitHub Actions.
+This used to be split across GitHub Actions (7 sources) + local (Punjab
+and BPPT, which time out completely from GitHub-hosted runners —
+`net::ERR_CONNECTION_TIMED_OUT`, confirmed 2026-08-24, even after
+generously raising the navigation timeout) — that looked like the kind of
+blanket cloud-provider-IP blocking Pakistani government/quasi-government
+sites commonly apply as an anti-scraping measure, though that's inferred
+from the symptom, not confirmed by the sites themselves. Simpler to just
+run everything from one place than keep two schedules and a shared-state
+dance in sync, so `.github/workflows/daily-run.yml` is now disabled (no
+`schedule` trigger, kept as `workflow_dispatch` for occasional manual use)
+and everything runs from `run_local_only.sh` instead. Re-enable the
+workflow's schedule (and go back to `--exclude punjab,bppt` there) if
+cloud scheduling ever makes sense again — e.g. a self-hosted runner with a
+Pakistani IP.
 
 ## Run manually
 
@@ -289,20 +275,19 @@ consolidate back onto GitHub Actions.
 # or: source .venv/bin/activate && python3 -m mandate_bot.main
 ```
 
-`run.sh` runs **all nine sources** locally — useful for a full manual/test
-run, distinct from the two scheduled jobs above which each run a subset.
-A full run currently takes on the order of tens of minutes to a few hours
-depending on network conditions, since every candidate document is
-downloaded/rendered and read individually with a polite delay between
-requests — this is normal, let it finish. Each source saves its progress
-incrementally, so an interrupted run can be safely resumed with
-`./run.sh` again.
+`run.sh` runs **all nine sources** locally — same scope as the scheduled
+`run_local_only.sh` job below, just without the git pull/sync/push steps
+around it, useful for a quick manual/test run. A full run currently takes
+on the order of tens of minutes to a few hours depending on network
+conditions, since every candidate document is downloaded/rendered and
+read individually with a polite delay between requests — this is normal,
+let it finish. Each source saves its progress incrementally, so an
+interrupted run can be safely resumed with `./run.sh` again.
 
-To run a specific subset (mirrors what each scheduled job does):
+To run a specific subset:
 
 ```bash
-python3 -m mandate_bot.main --source punjab,bppt      # what run_local_only.sh runs
-python3 -m mandate_bot.main --exclude punjab,bppt      # what GitHub Actions runs
+python3 -m mandate_bot.main --exclude punjab,bppt      # what the (disabled) GitHub Actions workflow ran
 python3 -m mandate_bot.main --source kppra             # any single source
 ```
 
@@ -348,11 +333,8 @@ python3 -m mandate_bot.main --rescan-last 50   # force re-check the 50 most rece
 ## Scheduling (macOS `launchd`)
 
 A ready-made job definition is included (`com.mandatebot.dailyrun.plist`)
-that runs `run_local_only.sh` — **Punjab + BPPT only** (see Deployment
-above for why) — daily at 06:00 PKT, two hours after GitHub Actions'
-04:00 PKT run so its `git pull` reliably picks up that run's state first.
-This job is **not currently installed** — install it to actually get
-Punjab/BPPT running on schedule:
+that runs `run_local_only.sh` — **all nine sources** — daily at 04:00 PKT.
+It's installed and loaded:
 
 ```bash
 cp com.mandatebot.dailyrun.plist ~/Library/LaunchAgents/
@@ -369,9 +351,8 @@ rm ~/Library/LaunchAgents/com.mandatebot.dailyrun.plist
 Logs from scheduled runs go to `logs/launchd.out.log` / `logs/launchd.err.log`
 in addition to the bot's own `logs/run.log`. Since this relies on
 `StartCalendarInterval`, the job only fires if the Mac is awake (or wakes
-on schedule) at 06:00 — a sleeping/shut-down Mac just skips that day's
-Punjab/BPPT run, same as any missed launchd job; nothing else depends on
-it firing exactly on time.
+on schedule) at 04:00 — a sleeping/shut-down Mac just skips that day's
+run, same as any missed launchd job.
 
 ## Known limitations
 
@@ -383,8 +364,8 @@ it firing exactly on time.
 - No email/Slack notification — check `logs/matches.csv` or the
   `downloads/` folder after each run. Ask if you'd like a notification
   step added.
-- Punjab + BPPT depend on the local Mac being awake at 06:00 PKT (see
-  Deployment above) — there's no cloud fallback for these two currently.
-  If the Mac is regularly off/asleep at that time, matches from these two
-  sources will lag until it next runs, though nothing is lost — each
-  still-unseen tender gets picked up on the next run whenever that is.
+- The whole bot now depends on the local Mac being awake at 04:00 PKT (see
+  Deployment above) — no cloud fallback currently, since GitHub Actions is
+  disabled. If the Mac is regularly off/asleep at that time, matches will
+  lag until it next runs, though nothing is lost — each still-unseen
+  tender gets picked up on the next run whenever that is.

@@ -1,21 +1,18 @@
 #!/bin/bash
-# Runs Punjab + BPPT only, scheduled locally via launchd (see
+# Runs all nine sources locally, scheduled via launchd (see
 # com.mandatebot.dailyrun.plist / README's Scheduling section).
 #
-# These two sources are excluded from the GitHub Actions workflow
-# (daily-run.yml) because they're unreachable from GitHub-hosted runners'
-# IP ranges — net::ERR_CONNECTION_TIMED_OUT, confirmed 2026-08-24, even
-# after generously raising the navigation timeout. Both work fine from a
-# normal local network, so they run here instead.
+# Two of the nine sources (Punjab, BPPT) are unreachable from GitHub-hosted
+# runners' IP ranges (net::ERR_CONNECTION_TIMED_OUT, confirmed
+# 2026-08-24) — rather than keep splitting the run across GitHub Actions
+# + local, everything just runs here now. The GitHub Actions workflow is
+# disabled (schedule removed, kept as workflow_dispatch only) so the two
+# don't double-scan the same sources.
 #
-# Both this script and the GitHub Actions workflow read/write the same
-# state/seen.json, committing it back to the repo after each run. Since
-# GitHub Actions now never touches Punjab/BPPT and this script only ever
-# runs those two, the two processes add disjoint sets of keys — but a
-# `git pull` before running is still required so this run's in-memory
-# state includes whatever GitHub Actions has committed since the last
-# local run, or its own save() would silently drop those keys when it
-# rewrites the whole file.
+# `git pull` before running picks up any state committed by a manual run
+# or a workflow_dispatch trigger since the last scheduled local run — or
+# this run's own save() would silently drop those keys when it rewrites
+# the whole file.
 set -euo pipefail
 cd "$(dirname "$0")"
 eval "$(/opt/homebrew/bin/brew shellenv)"
@@ -23,7 +20,7 @@ source .venv/bin/activate
 
 git pull --ff-only
 
-python3 -m mandate_bot.main --source punjab,bppt
+python3 -m mandate_bot.main
 
 if [ -f secrets.yaml ]; then
     SUPABASE_URL=$(python3 -c "import yaml; print((yaml.safe_load(open('secrets.yaml')) or {}).get('supabase', {}).get('url', ''))")
@@ -40,5 +37,5 @@ fi
 
 git add state/seen.json
 git pull --rebase --autostash
-git diff --cached --quiet || git commit -m "Update seen-tender state (local: punjab, bppt) [skip ci]"
+git diff --cached --quiet || git commit -m "Update seen-tender state (local run) [skip ci]"
 git push

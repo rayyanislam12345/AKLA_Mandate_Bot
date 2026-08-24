@@ -10,14 +10,13 @@
         <string>/Users/rayyanui/Mandate Bot/run_local_only.sh</string>
     </array>
 
-    <!-- Punjab + BPPT only — the other 7 sources run on GitHub Actions
-         (see .github/workflows/daily-run.yml, 23:00 UTC = 04:00 PKT).
-         06:00 PKT gives a 2-hour buffer so this run's `git pull` reliably
-         picks up that run's state.json commit first. -->
+    <!-- All nine sources, run locally — GitHub Actions is disabled
+         (schedule removed, kept as workflow_dispatch only) since two of
+         the nine sources are unreachable from its runners. 04:00 PKT. -->
     <key>StartCalendarInterval</key>
     <dict>
         <key>Hour</key>
-        <integer>6</integer>
+        <integer>4</integer>
         <key>Minute</key>
         <integer>0</integer>
     </dict>
