@@ -20,7 +20,20 @@ source .venv/bin/activate
 
 git pull --ff-only
 
+# Deliberately allowed to fail without killing the rest of this script — a
+# crash partway through one source (e.g. Playwright dying, confirmed once
+# via an EPIPE crash during BPPT scraping) must not also block syncing
+# whatever WAS found before the crash, or committing the dedupe state that
+# was made. Silent data loss (a real match found, then never synced,
+# because an unrelated later source crashed) is worse than a noisy
+# partial run.
+set +e
 python3 -m mandate_bot.main
+SCRAPE_EXIT=$?
+set -e
+if [ "$SCRAPE_EXIT" -ne 0 ]; then
+    echo "WARNING: mandate_bot.main exited with code $SCRAPE_EXIT — continuing anyway so any matches already found still get synced and committed." >&2
+fi
 
 if [ -f secrets.yaml ]; then
     SUPABASE_URL=$(python3 -c "import yaml; print((yaml.safe_load(open('secrets.yaml')) or {}).get('supabase', {}).get('url', ''))")
