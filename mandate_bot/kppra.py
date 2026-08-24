@@ -62,7 +62,7 @@ def _parse_listing_rows(html: str) -> list[dict]:
 def _fetch_detail(session: requests.Session, base_url: str, tender_id: str, verify_ssl: bool) -> dict | None:
     url = urljoin(base_url, f"includes/class.tender.php?getTenderDetails=yes&tender_id={tender_id}")
     try:
-        resp = get_with_retry(session, url, log, verify=verify_ssl, timeout=20)
+        resp = get_with_retry(session, url, log, verify=verify_ssl, timeout=30)
         data = resp.json()
         return data[0] if data else None
     except Exception as exc:
@@ -81,7 +81,7 @@ def fetch_all(base_url: str, listing_path: str, categories: list[str],
     while page_num <= max_pages:
         url = urljoin(base_url, f"{listing_path}?p={page_num}")
         try:
-            resp = get_with_retry(session, url, log, verify=verify_ssl, timeout=30)
+            resp = get_with_retry(session, url, log, verify=verify_ssl, timeout=45)
         except Exception:
             log.exception("Failed to fetch KPPRA listing page %d after retries, stopping here", page_num)
             break

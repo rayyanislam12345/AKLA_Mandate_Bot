@@ -31,6 +31,12 @@ log = logging.getLogger("mandate_bot.bppt")
 
 GOTO_RETRIES = 3
 GOTO_RETRY_BACKOFF = [2, 5, 10]  # seconds, one per retry attempt
+# Tuned generously (originally 30s) after a GitHub Actions CI run
+# (2026-08-23) saw all 3 attempts time out identically at the old ceiling —
+# the connection was never refused outright, just slower to complete than
+# from the local network this was first built against. A longer timeout
+# costs nothing on a normal/fast load, only helps the slow one.
+NAV_TIMEOUT_MS = 60000
 
 
 def _goto_with_retry(page, url: str, log_: logging.Logger):
@@ -40,7 +46,7 @@ def _goto_with_retry(page, url: str, log_: logging.Logger):
     last_exc = None
     for attempt in range(GOTO_RETRIES):
         try:
-            page.goto(url, wait_until="networkidle", timeout=30000)
+            page.goto(url, wait_until="networkidle", timeout=NAV_TIMEOUT_MS)
             return
         except Exception as exc:
             last_exc = exc
@@ -60,7 +66,7 @@ def _render_with_retry(page, url: str, log_: logging.Logger) -> str:
     last_exc = None
     for attempt in range(GOTO_RETRIES):
         try:
-            page.goto(url, wait_until="networkidle", timeout=30000)
+            page.goto(url, wait_until="networkidle", timeout=NAV_TIMEOUT_MS)
             page.wait_for_timeout(1000)
             return page.inner_text("body")
         except Exception as exc:

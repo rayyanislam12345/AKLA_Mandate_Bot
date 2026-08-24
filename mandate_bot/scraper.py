@@ -39,6 +39,12 @@ COL_NOTICE_TYPE, COL_TITLE, COL_CATEGORY, COL_PUBLISH, COL_CLOSE, COL_DEPT, COL_
 
 GOTO_RETRIES = 3
 GOTO_RETRY_BACKOFF = [2, 5, 10]
+# Tuned generously (originally 30s) after a GitHub Actions CI run
+# (2026-08-23) saw all 3 attempts time out identically at the old ceiling —
+# the connection was never refused outright, just slower to complete than
+# from the local network this was first built against. A longer timeout
+# costs nothing on a normal/fast load, only helps the slow one.
+NAV_TIMEOUT_MS = 60000
 
 
 def _parse_rows(soup: BeautifulSoup, listing_url: str) -> list[Tender]:
@@ -91,7 +97,7 @@ def _goto_and_capture(page, url: str, log_: logging.Logger) -> str:
     last_exc = None
     for attempt in range(GOTO_RETRIES):
         try:
-            resp = page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            resp = page.goto(url, wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS)
             return resp.text()
         except Exception as exc:
             last_exc = exc
@@ -133,7 +139,7 @@ def fetch_all(base_url: str, listing_path: str, verify_ssl: bool = True,
             time.sleep(request_delay)
             log.info("Fetching page %d", page_num + 1)
             try:
-                with page.expect_response(lambda r: listing_url in r.url, timeout=30000) as resp_info:
+                with page.expect_response(lambda r: listing_url in r.url, timeout=NAV_TIMEOUT_MS) as resp_info:
                     link.click()
                 html = resp_info.value.text()
             except Exception:
