@@ -16,6 +16,7 @@ from dateutil import parser as dateparser
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 MATCHES_CSV = os.path.join(ROOT, "logs", "matches.csv")
+DATE_REFRESH_CSV = os.path.join(ROOT, "logs", "date_refresh.csv")
 
 SUPABASE_URL = os.environ["SUPABASE_URL"].rstrip("/")
 SERVICE_ROLE_KEY = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
@@ -28,7 +29,12 @@ HEADERS = {
 
 def dedupe_key(row: dict) -> str:
     """Mirrors Tender.key in mandate_bot/models.py so a row upserts onto the
-    same identity the bot itself already uses for de-duplication."""
+    same identity the bot itself already uses for de-duplication. A source
+    that pinned its own key (Tender.dedupe_override) writes it into the CSV;
+    older rows predate the column and fall through to the same URL/ref
+    preference as before."""
+    if row.get("dedupe_key"):
+        return row["dedupe_key"]
     if row["document_url"]:
         return row["document_url"]
     if row["notice_url"]:
@@ -39,9 +45,18 @@ def dedupe_key(row: dict) -> str:
 
 
 def parse_date(value: str) -> str | None:
+    """Portals write dates in whatever format they like, so an unparseable one
+    is a bad cell rather than a reason to fail the whole sync."""
     if not value:
         return None
-    return dateparser.parse(value, dayfirst=True).date().isoformat()
+    try:
+        parsed = dateparser.parse(value, dayfirst=True)
+    except (ValueError, OverflowError, TypeError):
+        parsed = None
+    if parsed is None:
+        print(f"WARN: could not parse date {value!r} — leaving it empty", file=sys.stderr)
+        return None
+    return parsed.date().isoformat()
 
 
 def load_rows() -> list[dict]:
@@ -135,11 +150,51 @@ def upload_documents(rows: list[dict]) -> None:
     print(f"Uploaded {uploaded} document(s).")
 
 
+def refresh_dates() -> None:
+    """Patches publish/close dates onto opportunities that are already in the
+    table. A source writes date_refresh.csv for everything it can currently
+    see, matched or not, because dates move after first sighting — ADB extends
+    an advertisement's deadline and the CSRN's Publishing History gains an
+    Extension row. Only the two date columns are touched, so a row's documents,
+    keywords and storage folder are left exactly as they are."""
+    if not os.path.exists(DATE_REFRESH_CSV):
+        return
+    with open(DATE_REFRESH_CSV, newline="", encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+
+    patched = 0
+    for row in rows:
+        key = row.get("dedupe_key")
+        if not key:
+            continue
+        payload = {
+            "publish_date": parse_date(row.get("publish_date", "")),
+            "close_date": parse_date(row.get("close_date", "")),
+        }
+        if payload["publish_date"] is None and payload["close_date"] is None:
+            continue
+
+        resp = requests.patch(
+            f"{SUPABASE_URL}/rest/v1/mandate_opportunities",
+            headers={**HEADERS, "Content-Type": "application/json", "Prefer": "return=minimal"},
+            params={"dedupe_key": f"eq.{key}"},
+            json=payload,
+            timeout=60,
+        )
+        if resp.status_code >= 300:
+            print(f"WARN: failed to refresh dates for {key}: {resp.status_code} {resp.text}", file=sys.stderr)
+            continue
+        patched += 1
+
+    print(f"Refreshed dates on {patched} existing opportunity row(s).")
+
+
 def main():
     rows = load_rows()
     print(f"Loaded {len(rows)} row(s) from matches.csv")
     upsert_opportunities(rows)
     upload_documents(rows)
+    refresh_dates()
 
 
 if __name__ == "__main__":

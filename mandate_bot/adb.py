@@ -16,7 +16,16 @@ opportunity by ID later the way other sources do. Given the result set for
 legal-relevant searches is small (a few dozen), this source runs fetch and
 document-download as a single pass per search term instead of the usual
 two-phase fetch_all()/process_candidates() split — already-seen rows are
-skipped by title before ever clicking into them, so re-runs stay cheap.
+skipped before ever clicking into them, so re-runs stay cheap.
+
+Everything the dashboard shows about an opportunity except the Terms of
+Reference is already on the results grid: the project title (carrying ADB's
+selection number), the expertise tag, whether the package is open to a firm
+or an individual, the publication date and the closing deadline. The grid's
+deadline is the *effective* one — when ADB extends an advertisement, the
+CSRN's own Publishing History gains an Extension row and the grid shows the
+extended date — so dates are re-read on every run for already-seen rows too,
+and written to the date-refresh log for the sync to patch through.
 """
 from __future__ import annotations
 
@@ -29,7 +38,7 @@ from datetime import datetime
 
 from playwright.sync_api import sync_playwright
 
-from .logging_utils import append_match_log, unique_dest_dir
+from .logging_utils import append_match_log, unique_dest_dir, write_date_refresh
 from .models import Tender
 
 log = logging.getLogger("mandate_bot.adb")
@@ -38,6 +47,11 @@ HOME_URL = "https://selfservice.adb.org/OA_HTML/OA.jsp?OAFunc=XXCRS_CSRN_HOME_PA
 
 GOTO_RETRIES = 3
 GOTO_RETRY_BACKOFF = [2, 5, 10]
+
+# Header labels that identify the results grid. Matched case-insensitively as
+# prefixes, so ADB's "Deadline\n(Manila local time)" and "Engagement Period
+# (Months)" still line up.
+REQUIRED_HEADERS = ("project", "expertise", "published", "deadline")
 
 
 def _goto_with_retry(page, url: str, log_: logging.Logger):
@@ -64,16 +78,105 @@ def _search(page, term: str, log_: logging.Logger):
     page.wait_for_timeout(2000)
 
 
+def _norm(text: str | None) -> str:
+    return re.sub(r"\s+", " ", text or "").strip()
+
+
+def _find_results_table(page):
+    """OA Framework nests tables many levels deep, and an outer wrapper's
+    cells repeat all the text of everything inside it — so "the first table
+    whose header mentions Project and Deadline" lands on a wrapper whose
+    header row is a hundred cells of filter chrome. The real grid is the
+    *innermost* match: of the tables that qualify, the one with the fewest
+    header cells."""
+    best = None
+    for table in page.query_selector_all("table"):
+        rows = table.query_selector_all("tr")
+        if len(rows) < 2:
+            continue
+        header = [_norm(c.inner_text()).lower() for c in rows[0].query_selector_all("th,td")]
+        if not header or len(header) > 12:
+            continue
+        if all(any(h.startswith(want) for h in header) for want in REQUIRED_HEADERS):
+            if best is None or len(header) < best[1]:
+                best = (table, len(header))
+    return best[0] if best else None
+
+
+def _column_index(header: list[str]) -> dict[str, int]:
+    """Maps columns by their header label rather than a fixed position, so a
+    column ADB adds or reorders can't silently shift dates into the wrong
+    field."""
+    wanted = {
+        "project": "title",
+        "expertise": "expertise",
+        "consultant type": "consultant_type",
+        "engagement period": "months",
+        "published": "published",
+        "deadline": "deadline",
+        "view": "view",
+    }
+    index: dict[str, int] = {}
+    for i, cell in enumerate(header):
+        low = cell.lower()
+        for prefix, name in wanted.items():
+            if low.startswith(prefix):
+                index.setdefault(name, i)
+                break
+    return index
+
+
 def _parse_rows(page) -> list[dict]:
-    """Reads the results table without navigating away — title text alone
-    is enough to build a dedupe key, so new/seen can be decided before
-    ever clicking into a row."""
+    """Reads the whole results grid: title, expertise, consultant type, both
+    dates, the public project link, and the row's own "View CSRN" control.
+
+    This used to read nothing but anchor text, which is why every ADB row
+    reached the dashboard with no published or closing date — and why rows
+    whose title carries no parenthesised reference (ADB uses a second title
+    format for some postings) were dropped entirely."""
+    table = _find_results_table(page)
+    if table is None:
+        return []
+
+    trs = table.query_selector_all("tr")
+    header = [_norm(c.inner_text()) for c in trs[0].query_selector_all("th,td")]
+    index = _column_index(header)
+    if not {"title", "published", "deadline"} <= index.keys():
+        return []
+    widest = max(index.values())
+
     rows = []
-    for link in page.query_selector_all("table a"):
-        title = link.inner_text().strip()
-        # real project rows have long, distinctive titles; nav/filter chrome doesn't
-        if len(title) > 20 and "(" in title:
-            rows.append({"title": title})
+    for tr in trs[1:]:
+        cells = tr.query_selector_all("th,td")
+        if len(cells) <= widest:
+            continue  # spacer/layout row the grid interleaves between records
+
+        def cell(name: str) -> str:
+            i = index.get(name)
+            return _norm(cells[i].inner_text()) if i is not None else ""
+
+        title = cell("title")
+        if not title:
+            continue
+
+        anchor = cells[index["title"]].query_selector("a")
+        href = (anchor.get_attribute("href") or "") if anchor else ""
+        view = cells[index["view"]].query_selector("img") if "view" in index else None
+
+        rows.append({
+            "title": title,
+            "expertise": cell("expertise"),
+            "consultant_type": cell("consultant_type"),
+            "months": cell("months"),
+            "published": cell("published"),
+            "deadline": cell("deadline"),
+            # The Project link goes to the public adb.org project page. Useful
+            # to open, but it identifies the *project*, not this opportunity —
+            # one project can advertise several packages — so it must never
+            # become the dedupe key. See _make_tender.
+            "project_url": href if href.startswith("http") else "",
+            "view": view,
+        })
     return rows
 
 
@@ -92,18 +195,27 @@ def _extract_ref(title: str) -> str | None:
 
 
 def _make_tender(row: dict) -> Tender:
+    ref = _extract_ref(row["title"])
+    consultant_type = row.get("consultant_type", "")
     return Tender(
-        notice_type="Consulting Opportunity",
+        # Firm vs Individual decides whether the firm can bid at all, so it
+        # belongs on the face of the notice rather than buried in the TOR.
+        notice_type=f"Consulting Opportunity ({consultant_type})" if consultant_type else "Consulting Opportunity",
         title=row["title"],
-        category="",
-        publish_date="",
-        close_date="",
+        category=row.get("expertise", ""),
+        publish_date=row.get("published", ""),
+        close_date=row.get("deadline", ""),
         department="Asian Development Bank",
-        status="",
-        notice_url=None,
+        status=consultant_type,
+        notice_url=row.get("project_url") or None,
         document_url=None,
         source="adb",
-        tender_ref=_extract_ref(row["title"]) or "",
+        tender_ref=ref or "",
+        # Pin the identity to ADB's own selection number. Without this the
+        # generic key would switch to notice_url the moment one is populated,
+        # which would orphan every opportunity already marked seen *and*
+        # collapse sibling packages that share one project page.
+        dedupe_override=f"adb:{ref}" if ref else "",
     )
 
 
@@ -121,6 +233,10 @@ def run(search_terms: list[str], cfg: dict, state, log_: logging.Logger) -> tupl
     (checked_count, match_count)."""
     checked = 0
     match_count = 0
+    # Every listed opportunity's current dates, seen ones included, keyed by
+    # dedupe key — this is what lets an extended deadline reach a row the bot
+    # already reported.
+    current_dates: dict[str, dict] = {}
 
     with sync_playwright() as p:
         browser = p.chromium.launch()
@@ -136,12 +252,23 @@ def run(search_terms: list[str], cfg: dict, state, log_: logging.Logger) -> tupl
 
             rows = _parse_rows(page)
             log_.info("ADB search %r: %d rows", term, len(rows))
+            if not rows:
+                log_.warning("ADB search %r returned no parsable rows — the results grid "
+                             "may have changed shape", term)
 
             for row in rows:
                 t = _make_tender(row)
                 if t.key in seen_titles_this_run:
                     continue  # same opportunity can match multiple search terms
                 seen_titles_this_run.add(t.key)
+
+                if t.publish_date or t.close_date:
+                    current_dates[t.key] = {
+                        "dedupe_key": t.key,
+                        "source": t.source,
+                        "publish_date": t.publish_date,
+                        "close_date": t.close_date,
+                    }
 
                 if state.has(t.key):
                     continue
@@ -153,20 +280,24 @@ def run(search_terms: list[str], cfg: dict, state, log_: logging.Logger) -> tupl
                 # as a match. The TOR is downloaded for reference/reading,
                 # not as a further filter.
                 try:
-                    # re-run the search fresh so the results table (and its
-                    # View-CSRN icon indices) are in a known, valid state
+                    # Re-run the search so the grid (and its element handles)
+                    # are in a known, valid state, then click the View control
+                    # belonging to the matched row itself. The old code looked
+                    # the icon up by row position in a separately-filtered
+                    # list, so a single skipped row shifted every index and
+                    # downloaded the wrong opportunity's TOR.
                     _search(page, term, log_)
-                    fresh_rows = _parse_rows(page)
-                    row_index = next((i for i, r in enumerate(fresh_rows) if _same_opportunity(r["title"], row["title"])), None)
-                    if row_index is None:
+                    fresh_row = next(
+                        (r for r in _parse_rows(page) if _same_opportunity(r["title"], row["title"])),
+                        None,
+                    )
+                    if fresh_row is None:
                         log_.warning("Could not re-locate %r after re-search, skipping", row["title"][:80])
                         continue
-
-                    imgs = page.query_selector_all("img[src*='view'], img[alt*='View']")
-                    if row_index >= len(imgs):
-                        log_.warning("Row index out of range for %r, skipping", row["title"][:80])
+                    if fresh_row["view"] is None:
+                        log_.warning("No View control on the row for %r, skipping", row["title"][:80])
                         continue
-                    imgs[row_index].click()
+                    fresh_row["view"].click()
                     page.wait_for_timeout(2000)
 
                     dest_dir = unique_dest_dir(cfg["paths"]["download_dir"], t.title)
@@ -214,7 +345,8 @@ def run(search_terms: list[str], cfg: dict, state, log_: logging.Logger) -> tupl
                         continue
 
                     match_count += 1
-                    log_.info("MATCH: %s (via search term %r)", t.title, term)
+                    log_.info("MATCH: %s (published %s, closes %s, via search term %r)",
+                              t.title, t.publish_date or "?", t.close_date or "?", term)
                     append_match_log(cfg["paths"]["match_log"], {
                         "found_at": datetime.now().isoformat(timespec="seconds"),
                         "source": t.source,
@@ -225,11 +357,12 @@ def run(search_terms: list[str], cfg: dict, state, log_: logging.Logger) -> tupl
                         "publish_date": t.publish_date,
                         "close_date": t.close_date,
                         "matched_keywords": f"[ADB Expertise search: {term!r}]",
-                        "notice_url": "",
+                        "notice_url": t.notice_url or "",
                         "document_url": "",
                         "saved_dir": dest_dir,
                         "tender_ref": t.tender_ref,
                         "extra_urls": "",
+                        "dedupe_key": t.key,
                     })
 
                     state.mark(t.key)
@@ -238,5 +371,10 @@ def run(search_terms: list[str], cfg: dict, state, log_: logging.Logger) -> tupl
                     continue
 
         browser.close()
+
+    if current_dates:
+        refresh_path = os.path.join(os.path.dirname(cfg["paths"]["match_log"]), "date_refresh.csv")
+        write_date_refresh(refresh_path, list(current_dates.values()))
+        log_.info("ADB: recorded current dates for %d listed opportunity(ies)", len(current_dates))
 
     return checked, match_count

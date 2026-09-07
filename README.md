@@ -134,6 +134,35 @@ this source runs fetch and document-capture as one pass per search term
 re-runs stay cheap) rather than the two-phase split every other source
 uses.
 
+**Reading the results grid.** Everything the dashboard shows except the
+Terms of Reference is already on the grid — project title (carrying ADB's
+selection number), expertise tag, whether the package is open to a Firm or
+an Individual, publication date and closing deadline — so no extra page
+loads are needed for any of it. Finding that grid takes care: OA Framework
+nests tables many levels deep and an outer wrapper's cells repeat all the
+text inside it, so "the first table whose header mentions Project and
+Deadline" lands on a wrapper whose header row is a hundred cells of filter
+chrome. `_find_results_table` takes the *innermost* match instead, and
+columns are then mapped by header label rather than by position.
+
+The grid's deadline is the **effective** one: when ADB extends an
+advertisement its CSRN gains an Extension row in Publishing History and the
+grid shows the extended date. So dates are re-read on every run for
+already-seen opportunities too and written to `logs/date_refresh.csv`,
+which `sync_to_supabase.py` uses to patch just those two columns onto rows
+already in the table — nothing else about them is touched.
+
+**Identity.** ADB's `E-0xxxxx-00n` selection number identifies the
+recruitment notice, and one notice can advertise several packages (a Legal
+Expert and a Policy Consultant under the same TA appear as separate rows
+sharing one number). The Project link is worse still — it points at the
+public `adb.org` project page, which several notices can share — so it must
+never become the dedupe key. `_make_tender` therefore pins the key with
+`Tender.dedupe_override` rather than letting the generic URL-first
+preference in `Tender.key` pick it up. Note the consequence of the shared
+selection number: sibling packages under one notice currently collapse onto
+a single row.
+
 ### World Bank (`mandate_bot/worldbank.py`)
 The lightest source by far, and different from every other one in a key
 way: it's driven entirely by the World Bank's own JSON API
