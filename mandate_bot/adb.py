@@ -194,6 +194,25 @@ def _extract_ref(title: str) -> str | None:
     return m.group(1) if m else None
 
 
+def package_key(title: str, ref: str | None) -> str:
+    """The dedupe identity for one advertised package.
+
+    ADB's E-0xxxxx-00n number identifies the *recruitment notice*, and one
+    notice routinely advertises several packages — a Legal Expert and a Policy
+    Consultant under the same TA appear as separate rows sharing one number.
+    Keying on the number alone therefore collapsed siblings onto a single row
+    and the firm never saw the others; measured on one run, 12 listed
+    opportunities produced only 9 keys.
+
+    The title is what actually names the package, so it goes in the key.
+    Normalising it (case, punctuation, runs of whitespace) absorbs the small
+    wording drift ADB's live data shows between runs, and the trailing
+    reference is dropped because it is already carried separately.
+    """
+    slug = re.sub(r"\s+", " ", re.sub(r"[^\w\s]+", " ", _REF_RE.sub("", title).lower())).strip()
+    return f"adb:{ref}|{slug}" if ref else f"adb:|{slug}"
+
+
 def _make_tender(row: dict) -> Tender:
     ref = _extract_ref(row["title"])
     consultant_type = row.get("consultant_type", "")
@@ -211,19 +230,23 @@ def _make_tender(row: dict) -> Tender:
         document_url=None,
         source="adb",
         tender_ref=ref or "",
-        # Pin the identity to ADB's own selection number. Without this the
-        # generic key would switch to notice_url the moment one is populated,
-        # which would orphan every opportunity already marked seen *and*
-        # collapse sibling packages that share one project page.
-        dedupe_override=f"adb:{ref}" if ref else "",
+        # Pin the identity explicitly. Left to the generic preference in
+        # Tender.key it would follow notice_url now that one is populated, and
+        # the ADB project page is shared by every package on the project.
+        dedupe_override=package_key(row["title"], ref),
     )
 
 
 def _same_opportunity(a: str, b: str) -> bool:
-    ref_a, ref_b = _extract_ref(a), _extract_ref(b)
-    if ref_a and ref_b:
-        return ref_a == ref_b
-    return a == b
+    """Whether two listing titles are the same advertised package.
+
+    Comparing the reference alone is not enough: siblings under one recruitment
+    notice share it, so a ref match would re-locate whichever sibling happened
+    to come first and download its Terms of Reference against the wrong row.
+    package_key is the identity that actually distinguishes them, and it
+    normalises away the small title drift ADB's live data shows between two
+    searches minutes apart."""
+    return package_key(a, _extract_ref(a)) == package_key(b, _extract_ref(b))
 
 
 def run(search_terms: list[str], cfg: dict, state, log_: logging.Logger) -> tuple[int, int]:
