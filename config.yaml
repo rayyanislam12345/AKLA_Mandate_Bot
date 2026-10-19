@@ -156,11 +156,14 @@ adb:
   # with Mongolia, the Philippines and Central Asia (72 of the first 75 rows
   # were outside Pakistan). Keep only listings whose title carries one of
   # these ADB country codes (the token before the first colon, e.g.
-  # "TA-9839 PAK: ..."), or names the country outright. Empty list = no
-  # filter. Skipped rows are not marked seen, so widening this later picks
-  # them up on the next run.
+  # "TA-9839 PAK: ..."), or names the country outright. REG is ADB's code
+  # for regional projects open across member countries (CAREC, Pacific,
+  # bank-wide legal panels) — kept because Pakistan is often eligible.
+  # Empty list = no filter. Skipped rows are not marked seen, so widening
+  # this later picks them up on the next run.
   countries:
     - "PAK"
+    - "REG"
 
 # World Bank Procurement Notices (projects.worldbank.org), filtered to
 # Pakistan. Backed directly by the site's own JSON API
