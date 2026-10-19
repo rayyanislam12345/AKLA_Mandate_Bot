@@ -182,6 +182,39 @@ def _parse_rows(page) -> list[dict]:
 
 _REF_RE = re.compile(r"\(([\w./-]+)\)\s*$")
 
+# ADB prefixes every listing title with the financing instrument and the
+# three-letter member-country code of the project it belongs to, e.g.
+# "TA-9839 PAK: Preparing Urban Development Projects - Legal Expert",
+# "LOAN-6042 PAK: ...", "SC 127327 PAK: ...", "GRANT E-059108-001 TAJ: ...".
+# "REG" marks a regional project. The code is the token right before the
+# first colon; a handful of corporate-procurement titles carry no prefix.
+_COUNTRY_RE = re.compile(r"^[^:]{0,60}?\b([A-Z]{3}):")
+
+# Plain-English names, so a regional or unprefixed posting that names the
+# country in its title still counts for it.
+COUNTRY_NAMES = {"PAK": "Pakistan"}
+
+
+def country_code(title: str) -> str | None:
+    m = _COUNTRY_RE.match(title.strip())
+    return m.group(1) if m else None
+
+
+def is_wanted_country(title: str, countries: list[str]) -> bool:
+    """Whether a listing belongs to one of the configured countries. An empty
+    list means no filter. A title is wanted when its ADB country code is in
+    the list, or when it names one of those countries outright (which also
+    rescues a REG or unprefixed posting that is really about that country).
+    """
+    if not countries:
+        return True
+    wanted = {c.upper() for c in countries}
+    code = country_code(title)
+    if code in wanted:
+        return True
+    low = title.lower()
+    return any(COUNTRY_NAMES[c].lower() in low for c in wanted if c in COUNTRY_NAMES)
+
 
 def _extract_ref(title: str) -> str | None:
     """Most titles end with a stable package reference in parens, e.g.
@@ -249,13 +282,19 @@ def _same_opportunity(a: str, b: str) -> bool:
     return package_key(a, _extract_ref(a)) == package_key(b, _extract_ref(b))
 
 
-def run(search_terms: list[str], cfg: dict, state, log_: logging.Logger) -> tuple[int, int]:
+def run(search_terms: list[str], cfg: dict, state, log_: logging.Logger,
+        countries: list[str] | None = None) -> tuple[int, int]:
     """Combined fetch+process (see module docstring for why). No keywords
     parameter — being returned by the ADB Expertise search is itself the
-    match signal here, unlike every other source. Returns
+    match signal here, unlike every other source. `countries` restricts the
+    source to listings for those ADB member-country codes (see
+    is_wanted_country); the CMS search is bank-wide, and without it the feed
+    was mostly Mongolia, the Philippines and Central Asia. Returns
     (checked_count, match_count)."""
+    countries = countries or []
     checked = 0
     match_count = 0
+    skipped_country = 0
     # Every listed opportunity's current dates, seen ones included, keyed by
     # dedupe key — this is what lets an extended deadline reach a row the bot
     # already reported.
@@ -280,6 +319,10 @@ def run(search_terms: list[str], cfg: dict, state, log_: logging.Logger) -> tupl
                              "may have changed shape", term)
 
             for row in rows:
+                if not is_wanted_country(row["title"], countries):
+                    skipped_country += 1
+                    continue  # another member country's project — not marked seen, so a
+                              # later change to adb.countries can still pick it up
                 t = _make_tender(row)
                 if t.key in seen_titles_this_run:
                     continue  # same opportunity can match multiple search terms
@@ -394,6 +437,9 @@ def run(search_terms: list[str], cfg: dict, state, log_: logging.Logger) -> tupl
                     continue
 
         browser.close()
+
+    if countries:
+        log_.info("ADB: skipped %d listing(s) outside %s", skipped_country, ", ".join(countries))
 
     if current_dates:
         refresh_path = os.path.join(os.path.dirname(cfg["paths"]["match_log"]), "date_refresh.csv")

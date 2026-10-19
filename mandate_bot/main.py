@@ -282,6 +282,7 @@ def run():
                 cfg=cfg,
                 state=state,
                 log_=log,
+                countries=adb_cfg.get("countries", []),
             )
             log.info("ADB: %d checked, %d matches", adb_checked, adb_matches)
             match_count += adb_matches

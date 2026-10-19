@@ -128,6 +128,13 @@ separate file attachment also exists, so it's always captured as a PDF
 snapshot (same `page.pdf()` pattern as BPPT); any real attachment file is
 downloaded as well when present.
 
+The Expertise search is bank-wide, so `adb.countries` (default `["PAK"]`)
+keeps only listings whose title carries one of those ADB country codes —
+the token before the first colon, e.g. `TA-9839 PAK: …` — or names the
+country in words (so a `REG:` posting about Pakistan still counts).
+Skipped listings are not marked seen, so widening the list later picks
+them up on the next run. Set it to `[]` for the old bank-wide behaviour.
+
 Since the search box can't look up a specific opportunity by ID afterward,
 this source runs fetch and document-capture as one pass per search term
 (already-seen titles are skipped before ever clicking into them, so

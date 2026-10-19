@@ -152,6 +152,15 @@ adb:
   search_terms:
     - "legal"
     - "law"
+  # The Expertise search is bank-wide, so without this the feed filled up
+  # with Mongolia, the Philippines and Central Asia (72 of the first 75 rows
+  # were outside Pakistan). Keep only listings whose title carries one of
+  # these ADB country codes (the token before the first colon, e.g.
+  # "TA-9839 PAK: ..."), or names the country outright. Empty list = no
+  # filter. Skipped rows are not marked seen, so widening this later picks
+  # them up on the next run.
+  countries:
+    - "PAK"
 
 # World Bank Procurement Notices (projects.worldbank.org), filtered to
 # Pakistan. Backed directly by the site's own JSON API
